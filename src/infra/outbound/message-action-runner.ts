@@ -13,11 +13,11 @@ import type { ChannelId, ChannelPlugin } from "../../channels/plugins/types.publ
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { readBooleanParam } from "../../plugin-sdk/boolean-param.js";
 import { hasPollCreationParams } from "../../poll-params.js";
+import { withChannelReadAuthority } from "../../shared/channel-read-authority.js";
 import {
   CLAWHUB_RECOMMENDATIONS_CHANNEL_DATA_KEY,
   readClawHubRecommendations,
 } from "../../shared/clawhub-recommendations.js";
-import { withChannelReadAuthority } from "../../shared/channel-read-authority.js";
 import { createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import { formatErrorMessage } from "../errors.js";

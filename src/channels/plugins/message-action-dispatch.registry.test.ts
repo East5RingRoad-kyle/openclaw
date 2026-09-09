@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import { revokePluginRecordLifecycleEpoch } from "../../plugins/registry-lifecycle.js";
-import { createPluginRegistry } from "../../plugins/registry.js";
+import { projectPluginContributions } from "../../plugins/registry-contributions.js";
+import { revokePluginRecord } from "../../plugins/registry-lifecycle.js";
+import { createEmptyPluginRegistry, createPluginRegistry } from "../../plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import { withPluginRuntimeRegistryScope } from "../../plugins/runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "../../plugins/runtime/types.js";
@@ -268,55 +269,78 @@ describe("official plugin read-only authority", () => {
     },
   );
 
-  it.each([
-    "replace",
-    "reactivate",
-    "disable",
-    "remove",
-    "revoke",
-    "reregister",
-    "trust-downgrade",
-  ] as const)("fences subsequent I/O and results after %s", async (change) => {
-    const fixture = registerReader();
-    const resume = createDeferred();
-    const nextRequest = vi.fn();
-    fixture.handleAction.mockImplementation(async () => {
-      const assertCurrent = captureChannelReadAuthority();
-      expect(assertCurrent).toBeTypeOf("function");
-      await resume.promise;
-      assertCurrent?.();
-      nextRequest();
-      return receipt;
-    });
-    const read = dispatchChannelMessageAction(fixture.context);
-    const rejected = expect(read).rejects.toThrow("read authority is no longer active");
-    switch (change) {
-      case "replace":
-        setActivePluginRegistry(createTestRegistry([]));
-        break;
-      case "reactivate":
+  it.each(["reactivate", "adopt"] as const)(
+    "retains an unchanged registration across %s",
+    async (change) => {
+      const fixture = registerReader();
+      const resume = createDeferred();
+      const nextRequest = vi.fn();
+      fixture.handleAction.mockImplementation(async () => {
+        const assertCurrent = captureChannelReadAuthority();
+        await resume.promise;
+        assertCurrent?.();
+        nextRequest();
+        return receipt;
+      });
+      const read = dispatchChannelMessageAction(fixture.context);
+      if (change === "adopt") {
+        const next = createEmptyPluginRegistry();
+        next.plugins.push(fixture.record);
+        projectPluginContributions(fixture.owner.registry, fixture.record, next);
+        setActivePluginRegistry(next);
+      } else {
         setActivePluginRegistry(fixture.owner.registry);
-        break;
-      case "disable":
-        fixture.record.enabled = false;
-        break;
-      case "remove":
-        fixture.owner.registry.plugins.splice(0);
-        break;
-      case "revoke":
-        revokePluginRecordLifecycleEpoch(fixture.owner.registry, fixture.record);
-        break;
-      case "reregister":
-        fixture.register();
-        break;
-      case "trust-downgrade":
-        fixture.record.trustedOfficialInstall = false;
-        break;
-    }
-    resume.resolve();
-    await rejected;
-    expect(nextRequest).not.toHaveBeenCalled();
-  });
+      }
+      resume.resolve();
+      await expect(read).resolves.toBe(receipt);
+      expect(nextRequest).toHaveBeenCalledOnce();
+      // The retained registration can also admit a new invocation after publication.
+      await expect(dispatchChannelMessageAction(fixture.context)).resolves.toBe(receipt);
+      expect(nextRequest).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["replace", "disable", "remove", "revoke", "reregister", "trust-downgrade"] as const)(
+    "fences subsequent I/O and results after %s",
+    async (change) => {
+      const fixture = registerReader();
+      const resume = createDeferred();
+      const nextRequest = vi.fn();
+      fixture.handleAction.mockImplementation(async () => {
+        const assertCurrent = captureChannelReadAuthority();
+        expect(assertCurrent).toBeTypeOf("function");
+        await resume.promise;
+        assertCurrent?.();
+        nextRequest();
+        return receipt;
+      });
+      const read = dispatchChannelMessageAction(fixture.context);
+      const rejected = expect(read).rejects.toThrow("read authority is no longer active");
+      switch (change) {
+        case "replace":
+          setActivePluginRegistry(createTestRegistry([]));
+          break;
+        case "disable":
+          fixture.record.enabled = false;
+          break;
+        case "remove":
+          fixture.owner.registry.plugins.splice(0);
+          break;
+        case "revoke":
+          revokePluginRecord(fixture.owner.registry, fixture.record);
+          break;
+        case "reregister":
+          fixture.register();
+          break;
+        case "trust-downgrade":
+          fixture.record.trustedOfficialInstall = false;
+          break;
+      }
+      resume.resolve();
+      await rejected;
+      expect(nextRequest).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([false, true])(
     "suppresses already-issued results or errors after revocation (error=%s)",

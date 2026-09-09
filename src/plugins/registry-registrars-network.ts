@@ -333,7 +333,12 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
     }
     registry.channelSetups.push({ ...metadata, pluginId: record.id, enabled: record.enabled });
     if (registrationCapabilities.runtimeChannel) {
-      registry.channels.push({ ...metadata, pluginId: record.id, resolveChannelRuntime, captureReadAuthority });
+      registry.channels.push({
+        ...metadata,
+        pluginId: record.id,
+        resolveChannelRuntime,
+        captureReadAuthority,
+      });
     }
   };
 
