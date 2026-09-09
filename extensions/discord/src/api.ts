@@ -1,5 +1,5 @@
 // Discord API module exposes the plugin public contract.
-import { resolveFetch } from "openclaw/plugin-sdk/fetch-runtime";
+import { captureChannelReadAuthority, resolveFetch } from "openclaw/plugin-sdk/fetch-runtime";
 import { redactToolPayloadText } from "openclaw/plugin-sdk/logging-core";
 import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { readResponseTextLimited } from "openclaw/plugin-sdk/provider-http";
@@ -184,6 +184,7 @@ export async function requestDiscord<T>(
   token: string,
   options?: DiscordApiRequestOptions,
 ): Promise<T> {
+  const assertReadAuthority = captureChannelReadAuthority();
   const endpoint =
     options?.endpointRuntime === undefined ? getDiscordEndpointRuntime() : options.endpointRuntime;
   const fetchImpl = resolveFetch(endpoint?.fetch ?? options?.fetcher ?? fetch);
@@ -199,6 +200,7 @@ export async function requestDiscord<T>(
       const body = normalizeDiscordRequestBody(options?.body, headers);
       const requestSignal = createDiscordRequestSignal(options ?? {});
       try {
+        assertReadAuthority?.();
         const res = await fetchImpl(
           `${endpoint?.descriptor.restApiBaseUrl ?? DISCORD_API_BASE}${path}`,
           {

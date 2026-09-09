@@ -1,6 +1,7 @@
 // Discord plugin module implements rest behavior.
 import { inspect } from "node:util";
 import { gunzipSync } from "node:zlib";
+import { captureChannelReadAuthority } from "openclaw/plugin-sdk/fetch-runtime";
 import {
   clampTimerTimeoutMs,
   resolveIntegerOption as normalizeIntegerOption,
@@ -74,6 +75,11 @@ type QueuedRequest = {
   resolve: (value?: unknown) => void;
   reject: (reason?: unknown) => void;
   routeKey: string;
+};
+
+type RequestDispatchData = {
+  data?: RequestData;
+  assertReadAuthority?: () => void;
 };
 
 const defaultOptions = {
@@ -159,7 +165,7 @@ export class RequestClient {
   protected token: string;
   protected customFetch: RequestClientOptions["fetch"];
   protected requestControllers = new Set<AbortController>();
-  private scheduler: RestScheduler<RequestData>;
+  private scheduler: RestScheduler<RequestDispatchData>;
 
   constructor(token: string, options?: RequestClientOptions) {
     const endpoint = getDiscordEndpointRuntime();
@@ -173,7 +179,7 @@ export class RequestClient {
     this.token = token.replace(/^Bot\s+/i, "");
     this.customFetch = resolvedOptions?.fetch;
     this.options = normalizeRequestClientOptions(resolvedOptions);
-    this.scheduler = new RestScheduler<RequestData>(
+    this.scheduler = new RestScheduler<RequestDispatchData>(
       {
         lanes: normalizeSchedulerLanes(this.options.maxQueueSize, this.options.scheduler?.lanes),
         maxConcurrency: normalizeIntegerOption(
@@ -194,8 +200,9 @@ export class RequestClient {
         await this.executeRequest(
           request.method,
           request.path,
-          { data: request.data, query: request.query },
+          { data: request.data?.data, query: request.query },
           request.routeKey,
+          request.data?.assertReadAuthority,
         ),
     );
   }
@@ -226,14 +233,19 @@ export class RequestClient {
     params: { data?: RequestData; query?: QueuedRequest["query"] },
   ): Promise<unknown> {
     const routeKey = createRouteKey(method, path);
+    // A shared scheduler can drain under another caller's async context. Carry
+    // this request's authority explicitly through queueing and rate-limit retries.
+    const assertReadAuthority = captureChannelReadAuthority();
+    assertReadAuthority?.();
     if (!this.options.queueRequests) {
-      return await this.executeRequest(method, path, params, routeKey);
+      return await this.executeRequest(method, path, params, routeKey, assertReadAuthority);
     }
     return await this.scheduler.enqueue({
       method,
       path,
       priority: getRequestPriority(method, path),
-      ...params,
+      query: params.query,
+      data: { data: params.data, assertReadAuthority },
     });
   }
 
@@ -242,6 +254,7 @@ export class RequestClient {
     path: string,
     params: { data?: RequestData; query?: QueuedRequest["query"] },
     routeKey = createRouteKey(method, path),
+    assertReadAuthority?: () => void,
   ): Promise<unknown> {
     const url = `${this.options.apiBaseUrl}${appendQuery(path, params.query)}`;
     const headers = new Headers({
@@ -259,6 +272,7 @@ export class RequestClient {
       : controller.signal;
     this.requestControllers.add(controller);
     try {
+      assertReadAuthority?.();
       const response = await (this.customFetch ?? fetch)(url, {
         method,
         headers,
