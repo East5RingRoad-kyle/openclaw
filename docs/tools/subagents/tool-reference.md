@@ -132,6 +132,9 @@ In either mode, internal QA, research, coding, review, and test lanes use ordina
 <ParamField path="expectsCompletionMessage" type="boolean" default="true">
   Set `false` for fire-and-forget children. When the child finishes, OpenClaw skips the completion handoff to the requester (no announce or steer turn), records the delivery as not required, and still runs child cleanup. Inspect such children with `subagents` or `sessions_history`. `collect: true` always uses `false`.
 </ParamField>
+<ParamField path="completionTarget" type='"parent"'>
+  Return the result in a private requester turn with no automatic channel delivery. The parent may continue work or remain silent. Supported only for hidden native `mode: "run"` children; unavailable with ACP, `collect`, `visible`, `thread`, session mode, or `expectsCompletionMessage: false`. Omit to keep normal completion delivery. See [Private parent completion](/tools/subagents/announce#private-parent-completion).
+</ParamField>
 <ParamField path="sandbox" type='"inherit" | "require"' default="inherit">
   `require` rejects the spawn unless the target child runtime is sandboxed.
 </ParamField>
@@ -253,6 +256,17 @@ the current child sessions, run ids, statuses, labels, tasks, and
 `taskName` aliases without polling. The task and label fields in that
 block are quoted as data, not instructions, because they can originate
 from user/model-provided spawn arguments.
+
+Later turns also include `Recently Completed Subagents`, capped at the eight
+newest children that ended in the last 30 minutes. This lists execution metadata,
+not an acknowledgment of result delivery.
+
+`Child results awaiting delivery` carries retained completion obligations for
+the requester or controller session, even when the child ended more than 30
+minutes ago, a newer execution exists, or the current turn cannot spawn. It
+includes at most eight results, oldest first, with each result limited to 2,000
+characters. Omitted entries and truncated results are marked. Result text is
+quoted as data. Reading this context does not acknowledge or retry delivery.
 
 ## Tool: `subagents`
 
