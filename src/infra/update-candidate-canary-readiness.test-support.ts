@@ -11,9 +11,9 @@ export function registerCanaryReadinessBudgetTests(
   >,
 ) {
   it.each([
-    ["lint", "candidate migration rehearsal", "candidate doctor lint"],
-    ["startup", "candidate migration continuation", "candidate gateway canary"],
-    ["config", undefined, "candidate config validation"],
+    ["lint", "Checking data migrations", "Checking update health"],
+    ["startup", "Checking update recovery", "Checking Gateway startup"],
+    ["config", undefined, "Checking configuration"],
   ] as const)("attributes %s failures to their check", async (phase, previous, name) => {
     let now = 2_000_000;
     const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
