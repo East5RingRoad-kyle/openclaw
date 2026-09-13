@@ -10,10 +10,13 @@ export function summarizeUpdateStepFailure(
     "exitCode" | "termination" | "stdoutTail" | "stderrTail" | "failureFacts"
   >,
 ): string {
+  const repeatsCliError =
+    step.failureFacts?.length &&
+    /^\[openclaw\] (?:The CLI command failed\.|Reason: )/mu.test(step.stderrTail ?? "");
   return truncateUtf16Safe(
     [
       step.termination ?? `Exit code: ${step.exitCode ?? "unknown"}`,
-      ...(step.failureFacts?.length ? [] : [step.stdoutTail, step.stderrTail]).map((tail) =>
+      ...(repeatsCliError ? [] : [step.stdoutTail, step.stderrTail]).map((tail) =>
         sliceUtf16Safe(tail?.trim().split(/\r?\n/u).at(-1) ?? "", -120),
       ),
     ]
