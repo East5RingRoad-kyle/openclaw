@@ -332,7 +332,7 @@ describe("QA runtime parity scenario retry isolation", () => {
             timeoutMs: 100,
             markerPrefix: "fixture",
             textPrefix: "fixture",
-            input: { conversation: { kind: "dm", id: "fixture" }, senderId: "fixture" },
+            input: { conversation: { kind: "direct", id: "fixture" }, senderId: "fixture" },
           },
         },
         context,
