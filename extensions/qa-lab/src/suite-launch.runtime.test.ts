@@ -377,7 +377,9 @@ describe("qa suite runtime launcher", () => {
     expect(result.result.scenarios.map((scenario) => scenario.evidenceOccurrenceId)).toEqual(
       outcomes.map((outcome) => outcome.occurrenceId),
     );
-    if (evidence.schemaVersion !== 3) throw new Error("expected recorded native instances");
+    if (evidence.schemaVersion !== 3) {
+      throw new Error("expected recorded native instances");
+    }
     const logs = evidence.occurrences.flatMap((occurrence) =>
       occurrence.receipts.map((receipt) => receipt.artifact),
     );
@@ -425,7 +427,9 @@ describe("qa suite runtime launcher", () => {
       JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
     );
     expect(JSON.stringify(legacy)).toBe(before);
-    if (evidence.schemaVersion !== 3) throw new Error("expected invocation-owned import");
+    if (evidence.schemaVersion !== 3) {
+      throw new Error("expected invocation-owned import");
+    }
     expect(
       evidence.entries.map(({ binding: _binding, effective: _effective, ...row }) => row),
     ).toEqual(rows);
@@ -577,7 +581,9 @@ describe("qa suite runtime launcher", () => {
         onEvidence: (summary) => snapshots.push(structuredClone(summary)),
       });
       expect(result.executionKind).toBe("flow");
-      if (result.executionKind !== "flow") throw new Error("expected flow result");
+      if (result.executionKind !== "flow") {
+        throw new Error("expected flow result");
+      }
       const evidence = result.result.evidence as QaEvidenceSummaryV3Json;
       expect(attempts).toBe(2);
       expect(snapshots).toHaveLength(4);
@@ -645,7 +651,9 @@ describe("qa suite runtime launcher", () => {
         providerMode: "mock-openai",
         scenarioIds: [scenario.id],
       });
-      if (result.executionKind !== "flow") throw new Error("expected flow result");
+      if (result.executionKind !== "flow") {
+        throw new Error("expected flow result");
+      }
       expect(roots).toHaveLength(2);
       expect(roots[0]).toBe(roots[1]);
       expect(result.result.outputDir).toBe(roots[0]);
@@ -658,7 +666,9 @@ describe("qa suite runtime launcher", () => {
         retryStatus !== "pass",
         retryStatus === "pass",
       ]);
-      if (retryStatus !== "pass") expect(result.result.scenarios[0]).toEqual(firstResult);
+      if (retryStatus !== "pass") {
+        expect(result.result.scenarios[0]).toEqual(firstResult);
+      }
       expect(await fs.readFile(firstPath!)).toEqual(firstBytes);
       for (const occurrence of evidence.occurrences) {
         for (const receipt of occurrence.receipts) {
@@ -967,7 +977,9 @@ describe("qa suite runtime launcher", () => {
           details: `actual child attempt ${attempts}`,
         });
         if (target && attempts === 1) {
-          if (failure === "after-pass") throw new Error("parent publication failed");
+          if (failure === "after-pass") {
+            throw new Error("parent publication failed");
+          }
           throw new QaSuiteInfraError("transport_ready_timeout", "retry this captured failure");
         }
         return { ...base, evidence: recording.snapshot(), scenarios: [result] };
@@ -983,7 +995,9 @@ describe("qa suite runtime launcher", () => {
         JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
       );
       expect(evidence.schemaVersion).toBe(3);
-      if (evidence.schemaVersion !== 3) throw new Error("expected recorded aggregate");
+      if (evidence.schemaVersion !== 3) {
+        throw new Error("expected recorded aggregate");
+      }
       expect(new Set(anchors).size).toBe(1);
       expect(anchors).toHaveLength(failure === "after-pass" ? 1 : 2);
       const outcomes = projectQaEvidenceScenarioOutcomes(evidence);
@@ -2672,7 +2686,9 @@ describe("qa suite runtime launcher", () => {
     const evidence = validateQaEvidenceSummaryJson(
       JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
     );
-    if (evidence.schemaVersion !== 3) throw new Error("expected aggregate occurrence evidence");
+    if (evidence.schemaVersion !== 3) {
+      throw new Error("expected aggregate occurrence evidence");
+    }
     const passed = runQaTestFileScenarios.mock.calls[0]![0].preparedDockerEvidence;
     expect(passed).toBeDefined();
     const receipts = evidence.occurrences.flatMap((occurrence) => occurrence.receipts);

@@ -825,17 +825,20 @@ describe("qa suite", () => {
         if (recorded) {
           const parsed = validateQaEvidenceSummaryJson(evidence);
           expect(parsed.schemaVersion).toBe(3);
-          if (parsed.schemaVersion !== 3) throw new Error("expected recorded occurrences");
+          if (parsed.schemaVersion !== 3) {
+            throw new Error("expected recorded occurrences");
+          }
           expect(parsed.occurrences).toEqual(before.occurrences);
           expect(parsed.entries[0]?.binding).toEqual(before.entries[0]?.binding);
           expect(recordedEvidence).toEqual(before);
           expect(parsed.occurrences.flatMap((occurrence) => occurrence.receipts)).toEqual([]);
           const rebased = rebaseQaSuiteEvidence(parsed, outputDir, path.dirname(outputDir));
           expect(rebased.entries[0]?.execution?.artifacts).toEqual(
-            parsed.entries[0]?.execution?.artifacts.map((artifact) => ({
-              ...artifact,
-              path: `${path.basename(outputDir)}/${artifact.path}`,
-            })),
+            parsed.entries[0]?.execution?.artifacts.map((artifact) =>
+              Object.assign({}, artifact, {
+                path: `${path.basename(outputDir)}/${artifact.path}`,
+              }),
+            ),
           );
         }
         expect(evidence.entries?.[0]?.execution?.channel).toMatchObject({

@@ -12,11 +12,11 @@ vi.mock("node:child_process", async () => {
   // Node's execFile promisify contract returns both streams, not just stdout.
   Object.defineProperty(execFileMock, Symbol.for("nodejs.util.promisify.custom"), {
     value: (...args: unknown[]) =>
-      new Promise((resolve, reject) =>
+      new Promise((resolve, reject) => {
         execFileMock(...args, (error: Error | null, stdout: string, stderr: string) =>
           error ? reject(error) : resolve({ stdout, stderr }),
-        ),
-      ),
+        );
+      }),
   });
   return {
     ...actual,

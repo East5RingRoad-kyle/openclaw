@@ -171,7 +171,9 @@ function createQaPartitionEvidenceOwner(params: {
       const offset = offsets.get(id) ?? 0;
       offsets.set(id, offset + 1);
       const key = `${id}:${offset}`;
-      if (!rawRowOrder.has(key)) rawRowOrder.set(key, rawRowOrder.size);
+      if (!rawRowOrder.has(key)) {
+        rawRowOrder.set(key, rawRowOrder.size);
+      }
       return { entry, order: rawRowOrder.get(key)! };
     });
   };
@@ -239,7 +241,9 @@ function createQaPartitionEvidenceOwner(params: {
       });
       if (previous !== null || final) {
         invocation.select(index, id);
-        if (!final && childSelected !== null) invocation.select(index, childSelected);
+        if (!final && childSelected !== null) {
+          invocation.select(index, childSelected);
+        }
       }
       parentFailures.set(index, previous ?? id);
       const selectedId = final ? invocation.select(index, id) : undefined;
@@ -266,7 +270,9 @@ function createQaPartitionEvidenceOwner(params: {
     results: QaUnifiedPartitionResult["scenarioResults"],
     startedIds: readonly string[],
   ) => {
-    if (evidence.schemaVersion === 3) receive(evidence);
+    if (evidence.schemaVersion === 3) {
+      receive(evidence);
+    }
     const invocation = restore();
     const remaining = [...results];
     const normalized: QaUnifiedPartitionResult["scenarioResults"] = [];
@@ -281,7 +287,9 @@ function createQaPartitionEvidenceOwner(params: {
           : candidate.scenarioId === scenario.id,
       );
       const result = resultIndex >= 0 ? remaining.splice(resultIndex, 1)[0] : undefined;
-      if (!result && !startedIds.includes(scenario.id)) continue;
+      if (!result && !startedIds.includes(scenario.id)) {
+        continue;
+      }
       if (
         evidence.schemaVersion === 3 &&
         result &&
@@ -298,7 +306,9 @@ function createQaPartitionEvidenceOwner(params: {
         const rows = unambiguous
           ? evidence.entries.filter((entry) => entry.test.id === scenario.id)
           : [];
-        if (result && unambiguous) legacyOwners.set(scenario.id, id);
+        if (result && unambiguous) {
+          legacyOwners.set(scenario.id, id);
+        }
         invocation.complete(id, {
           status,
           entries: result
@@ -454,7 +464,9 @@ function groupQaScenariosByExecutionCell(
     const key = JSON.stringify([cell.scenarioId, channel]);
     const position = positions.get(key) ?? 0;
     const scenario = scenariosById.get(cell.scenarioId)?.[position];
-    if (!scenario) throw new Error("execution cell has no scheduled scenario instance");
+    if (!scenario) {
+      throw new Error("execution cell has no scheduled scenario instance");
+    }
     group.push(scenario);
     positions.set(key, position + 1);
     groups.set(channel, group);
@@ -1556,7 +1568,9 @@ async function runUnifiedQaSuite(params: {
         } catch (error) {
           // Failed partitions still own durable failure evidence; rejecting here would
           // discard completed siblings and prevent the unified artifacts from existing.
-          if (!failure) throw error;
+          if (!failure) {
+            throw error;
+          }
           return failure;
         }
       },
@@ -1657,9 +1671,13 @@ async function runUnifiedQaSuite(params: {
   );
   const scenarios = orderedAnchors.flatMap((anchor) => {
     const id = anchor.scenario?.kind === "instance" ? anchor.scenario.resultOccurrenceId : null;
-    if (id === null) return [];
+    if (id === null) {
+      return [];
+    }
     const result = resultsByOccurrence.get(id);
-    if (!result) throw new Error("aggregate selected observation has no returned result");
+    if (!result) {
+      throw new Error("aggregate selected observation has no returned result");
+    }
     return [result];
   });
   const unifiedResult = await writeUnifiedQaSuiteArtifacts({

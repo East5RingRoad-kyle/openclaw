@@ -161,12 +161,16 @@ export async function runQaRuntimeParitySuite(params: {
               const cellStartedAt = Date.now();
               let childEvidence: QaEvidenceSummaryV3Json | undefined;
               const importChild = () => {
-                if (!childEvidence) return null;
+                if (!childEvidence) {
+                  return null;
+                }
                 const selected = recording.invocation.importChild(
                   index,
                   rebaseQaSuiteEvidence(childEvidence, cellOutputDir, params.outputDir),
                 );
-                if (selected) recording.invocation.select(index, selected);
+                if (selected) {
+                  recording.invocation.select(index, selected);
+                }
                 recording.publish();
                 return selected;
               };
@@ -224,6 +228,7 @@ export async function runQaRuntimeParitySuite(params: {
                   throw new AggregateError(
                     [error, reconciliationError],
                     "runtime parity child and evidence reconciliation failed",
+                    { cause: reconciliationError },
                   );
                 }
                 throw error;
@@ -325,6 +330,7 @@ export async function runQaRuntimeParitySuite(params: {
               throw new AggregateError(
                 [error, recordError],
                 "runtime parity and evidence publication failed",
+                { cause: recordError },
               );
             }
           }

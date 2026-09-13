@@ -251,7 +251,9 @@ export async function writeQaSuiteArtifacts(params: {
     // Publication adds presentation links to the cloned rows, never to target
     // receipts. Slim evidence keeps its intentionally absent execution fields.
     for (const entry of evidence.entries) {
-      if (!entry.execution) continue;
+      if (!entry.execution) {
+        continue;
+      }
       for (const artifact of artifactPaths) {
         if (
           !entry.execution.artifacts.some(

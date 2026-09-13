@@ -302,7 +302,9 @@ describe("QA runtime parity scenario retry isolation", () => {
     );
     const summary = mocks.writeQaSuiteArtifacts.mock.calls.at(-1)![0].recordedEvidence!;
     expect(summary.schemaVersion).toBe(3);
-    if (summary.schemaVersion !== 3) throw new Error("expected occurrences");
+    if (summary.schemaVersion !== 3) {
+      throw new Error("expected occurrences");
+    }
     const receipts = summary.occurrences.flatMap((occurrence) => occurrence.receipts);
     expect(receipts.find((receipt) => receipt.phase === "runtime")?.identity).toEqual({
       source: { ref: null, integrity: null },

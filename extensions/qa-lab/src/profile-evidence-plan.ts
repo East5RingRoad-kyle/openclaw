@@ -224,7 +224,9 @@ function evaluateProof(
       const byId = new Map(evidence.occurrences.map((occurrence) => [occurrence.id, occurrence]));
       const superseded = new Set<string>();
       for (const entry of evidence.entries) {
-        if (!entry.effective) continue;
+        if (!entry.effective) {
+          continue;
+        }
         let prior = byId.get(entry.binding.occurrenceId)?.retryOf;
         while (prior) {
           superseded.add(prior);
@@ -232,7 +234,9 @@ function evaluateProof(
         }
       }
       for (const occurrence of evidence.occurrences) {
-        if (occurrence.scenario?.kind === "instance") continue;
+        if (occurrence.scenario?.kind === "instance") {
+          continue;
+        }
         const rows = evidence.entries.filter(
           (entry) => entry.binding.occurrenceId === occurrence.id,
         );
@@ -300,7 +304,9 @@ function evaluateProof(
                   : alternative.proofClass === "packaged-install/upgrade"
                     ? receipt.phase !== "prepared"
                     : true;
-                if (matches && phaseMatches) return "qualified";
+                if (matches && phaseMatches) {
+                  return "qualified";
+                }
                 return dimensions.some(
                   ([key, value]) =>
                     key !== "proofClass" && actual[key] !== null && actual[key] !== value,

@@ -754,27 +754,32 @@ export function qaMaturityTaxonomyIdentity(
   // Evidence binds to capability meaning and proof obligations, not maturity decisions
   // or YAML layout. Explicit projection keeps unrelated metadata out of the identity.
   const semantics = {
-    profiles: byId(taxonomy.profiles).map((profile) => ({
-      id: profile.id,
-      description: profile.description,
-      includeAllCategories: profile.includeAllCategories,
-      categoryIds: refs(profile.categoryIds),
-      coverageIds: refs(profile.coverageIds),
-      channelDriver: profile.channelDriver,
-      evidenceMode: profile.evidenceMode ?? "full",
-      ...(profile.proofRequirements
-        ? {
-            proofRequirements: byId(profile.proofRequirements).map((requirement) => ({
-              ...requirement,
-              alternatives: requirement.alternatives.toSorted((left, right) => {
-                const a = JSON.stringify(left);
-                const b = JSON.stringify(right);
-                return a < b ? -1 : a > b ? 1 : 0;
-              }),
-            })),
-          }
-        : {}),
-    })),
+    profiles: byId(taxonomy.profiles).map((profile) =>
+      Object.assign(
+        {
+          id: profile.id,
+          description: profile.description,
+          includeAllCategories: profile.includeAllCategories,
+          categoryIds: refs(profile.categoryIds),
+          coverageIds: refs(profile.coverageIds),
+          channelDriver: profile.channelDriver,
+          evidenceMode: profile.evidenceMode ?? "full",
+        },
+        profile.proofRequirements
+          ? {
+              proofRequirements: byId(profile.proofRequirements).map((requirement) =>
+                Object.assign({}, requirement, {
+                  alternatives: requirement.alternatives.toSorted((left, right) => {
+                    const a = JSON.stringify(left);
+                    const b = JSON.stringify(right);
+                    return a < b ? -1 : a > b ? 1 : 0;
+                  }),
+                }),
+              ),
+            }
+          : {},
+      ),
+    ),
     surfaces: byId(activeQaMaturityTaxonomySurfaces(taxonomy)).map((surface) => ({
       id: surface.id,
       name: surface.name,

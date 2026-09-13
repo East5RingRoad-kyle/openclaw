@@ -52,11 +52,12 @@ describe("script evidence reader", () => {
         generatedAt: source.generatedAt,
         evidenceMode,
         occurrences: [occurrence],
-        entries: source.entries.map((entry) => ({
-          ...entry,
-          effective: true,
-          binding: { occurrenceId: occurrence.id, assertionId: null, receiptId: "target" },
-        })),
+        entries: source.entries.map((entry) =>
+          Object.assign({}, entry, {
+            effective: true,
+            binding: { occurrenceId: occurrence.id, assertionId: null, receiptId: "target" },
+          }),
+        ),
       });
       const evidencePath = path.join(evidenceDir, "qa-evidence.json");
       const raw = JSON.stringify(evidence);

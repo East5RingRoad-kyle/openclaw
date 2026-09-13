@@ -134,30 +134,38 @@ export async function createQaSuiteEvidenceInvocation(
     invocation.complete(id, {
       status: result.status === "skip" ? "skipped" : result.status,
       receipts,
-      entries: (options.importedEntries ?? rows).map((entry) => ({
-        ...entry,
-        ...(options.diagnostic ? { coverage: [] } : {}),
-        binding: {
-          occurrenceId: id,
-          assertionId: null,
-          receiptId: options.importedEntries ? null : runtimeIdentity ? runtimeId : preparedId,
-        },
-        effective: true,
-      })),
+      entries: (options.importedEntries ?? rows).map((entry) =>
+        Object.assign({}, entry, options.diagnostic ? { coverage: [] } : {}, {
+          binding: {
+            occurrenceId: id,
+            assertionId: null,
+            receiptId: options.importedEntries ? null : runtimeIdentity ? runtimeId : preparedId,
+          },
+          effective: true,
+        }),
+      ),
     });
     const selectedId = invocation.select(index, options.selectedId ?? id);
     recordedResults.set(id, recordedResult);
     publish();
-    if (selectedId === id) return recordedResult;
-    if (result.evidenceOccurrenceId === selectedId) return structuredClone(result);
+    if (selectedId === id) {
+      return recordedResult;
+    }
+    if (result.evidenceOccurrenceId === selectedId) {
+      return structuredClone(result);
+    }
     const retained = recordedResults.get(selectedId);
-    if (retained) return structuredClone(retained);
+    if (retained) {
+      return structuredClone(retained);
+    }
     const selected = invocation.selectedObservation(index)!;
     const receipt = selected.occurrence.receipts.find(
       (item) =>
         item.artifact.source === "qa-suite" && item.artifact.kind === "scenario-observation",
     );
-    if (!receipt) throw new Error("selected flow result has no captured artifact");
+    if (!receipt) {
+      throw new Error("selected flow result has no captured artifact");
+    }
     const bytes = await fs.readFile(path.resolve(context.outputDir, receipt.artifact.path));
     if (createHash("sha256").update(bytes).digest("hex") !== receipt.artifact.sha256) {
       throw new Error("selected flow result artifact changed");

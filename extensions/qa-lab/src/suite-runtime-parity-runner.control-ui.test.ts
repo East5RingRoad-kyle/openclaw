@@ -33,7 +33,7 @@ vi.mock("./scenario-catalog.js", async (importOriginal) => ({
 vi.mock("./suite-planning.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./suite-planning.js")>()),
   resolveQaSuiteOutputDir: vi.fn(
-    async (_repoRoot: string, outputDir?: string) => outputDir ?? "/qa-output",
+    async (_repoRoot: string, requestedOutputDir?: string) => requestedOutputDir ?? "/qa-output",
   ),
 }));
 
@@ -268,7 +268,9 @@ describe("runtime parity Control UI ownership", () => {
     let calls = 0;
     mocks.runQaFlowSuiteStandard.mockImplementation(async (params, context) => {
       const recording = await createQaSuiteEvidenceInvocation(params, context);
-      if (++calls === 2) throw failure;
+      if (++calls === 2) {
+        throw failure;
+      }
       const result = await original(params, context);
       result.scenarios[0] = await recording.record(
         0,

@@ -176,14 +176,28 @@ describe("QA profile evidence plan", () => {
     { field: "prepared", expected: "insufficient" },
   ])("classifies $field identity without inventing a product failure", ({ field, expected }) => {
     const identity = structuredClone(proofIdentity);
-    if (field === "source") identity.source.ref = "different-source";
-    if (field === "package") identity.package!.integrity = "different-package";
-    if (field === "runtime") identity.runtime.version = "different-version";
-    if (field === "account") identity.accountRef = "different-account";
-    if (field === "unknown") identity.runtime.version = null;
-    if (field === "class") identity.proofClass = "fixture-only";
+    if (field === "source") {
+      identity.source.ref = "different-source";
+    }
+    if (field === "package") {
+      identity.package!.integrity = "different-package";
+    }
+    if (field === "runtime") {
+      identity.runtime.version = "different-version";
+    }
+    if (field === "account") {
+      identity.accountRef = "different-account";
+    }
+    if (field === "unknown") {
+      identity.runtime.version = null;
+    }
+    if (field === "class") {
+      identity.proofClass = "fixture-only";
+    }
     const evidence = proofEvidence([{ status: "pass", identity }]);
-    if (field === "prepared") evidence.occurrences[1]!.receipts[0]!.phase = "prepared";
+    if (field === "prepared") {
+      evidence.occurrences[1]!.receipts[0]!.phase = "prepared";
+    }
     const [result] = qaProfileEvidencePlan.evaluateProof(proofPlan(), evidence);
     expect(result?.qualified).toBe(false);
     expect(result?.checks.map((check) => check.status)).toEqual([expected]);
@@ -416,7 +430,7 @@ describe("QA profile evidence plan", () => {
 
   it("attests only explicit owner-accepted proof requirements and preserves unknown absence", () => {
     const plan = buildPlan([]);
-    const requirements = qaProofRequirementsSchema.parse([
+    const declaredRequirements = qaProofRequirementsSchema.parse([
       {
         id: "native-install",
         coverageId: "channels.dm",
@@ -429,20 +443,27 @@ describe("QA profile evidence plan", () => {
         retryAcceptance: "all-recorded-attempts",
       },
     ]);
-    const captured = qaProfileEvidencePlan.attest({ ...plan, proofRequirements: requirements });
-    expect(captured.plan.proofRequirements).toEqual(requirements);
+    const captured = qaProfileEvidencePlan.attest({
+      ...plan,
+      proofRequirements: declaredRequirements,
+    });
+    expect(captured.plan.proofRequirements).toEqual(declaredRequirements);
     expect(captured.sha256).not.toBe(qaProfileEvidencePlan.attest(plan).sha256);
     expect(plan).not.toHaveProperty("proofRequirements");
-    expect(() => qaProofRequirementsSchema.parse([{ ...requirements[0], owner: "" }])).toThrow();
     expect(() =>
-      qaProofRequirementsSchema.parse([{ ...requirements[0], acceptedRef: undefined }]),
+      qaProofRequirementsSchema.parse([{ ...declaredRequirements[0], owner: "" }]),
     ).toThrow();
     expect(() =>
-      qaProofRequirementsSchema.parse([{ ...requirements[0], retryAcceptance: undefined }]),
+      qaProofRequirementsSchema.parse([{ ...declaredRequirements[0], acceptedRef: undefined }]),
     ).toThrow();
     expect(() =>
-      qaProofRequirementsSchema.parse([{ ...requirements[0], alternatives: [{}] }]),
+      qaProofRequirementsSchema.parse([{ ...declaredRequirements[0], retryAcceptance: undefined }]),
     ).toThrow();
-    expect(() => qaProofRequirementsSchema.parse([requirements[0], requirements[0]])).toThrow();
+    expect(() =>
+      qaProofRequirementsSchema.parse([{ ...declaredRequirements[0], alternatives: [{}] }]),
+    ).toThrow();
+    expect(() =>
+      qaProofRequirementsSchema.parse([declaredRequirements[0], declaredRequirements[0]]),
+    ).toThrow();
   });
 });

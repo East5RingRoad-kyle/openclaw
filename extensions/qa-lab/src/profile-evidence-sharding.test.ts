@@ -225,15 +225,16 @@ describe("QA profile evidence sharding", () => {
           ...summary,
           evidenceMode,
           occurrences: [occurrence],
-          entries: summary.entries.map((entry) => ({
-            ...entry,
-            effective: true,
-            binding: {
-              occurrenceId: occurrence.id,
-              assertionId: null,
-              receiptId: artifact ? "runtime-receipt" : null,
-            },
-          })),
+          entries: summary.entries.map((entry) =>
+            Object.assign({}, entry, {
+              effective: true,
+              binding: {
+                occurrenceId: occurrence.id,
+                assertionId: null,
+                receiptId: artifact ? "runtime-receipt" : null,
+              },
+            }),
+          ),
         });
         await fs.writeFile(file, JSON.stringify(v3));
       }

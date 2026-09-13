@@ -512,7 +512,9 @@ describe("Code Mode model matrix extended fixtures", () => {
         JSON.parse(await readArtifact("qa-evidence.json")),
       );
       expect(evidence.schemaVersion).toBe(3);
-      if (evidence.schemaVersion !== 3) throw new Error("expected invocation-owned evidence");
+      if (evidence.schemaVersion !== 3) {
+        throw new Error("expected invocation-owned evidence");
+      }
       expect(evidence.entries).toHaveLength(rows.length);
       const outcomes = projectQaEvidenceScenarioOutcomes(evidence);
       expect(outcomes.map((outcome) => outcome.scenarioId)).toEqual(rows.map((row) => row.id));
@@ -589,7 +591,9 @@ describe("Code Mode model matrix extended fixtures", () => {
     );
     expect(evidence.entries).toEqual([]);
     expect(evidence.schemaVersion).toBe(3);
-    if (evidence.schemaVersion !== 3) throw new Error("expected scheduled evidence");
+    if (evidence.schemaVersion !== 3) {
+      throw new Error("expected scheduled evidence");
+    }
     expect(evidence.occurrences).toHaveLength(3);
     expect(evidence.occurrences.map((occurrence) => occurrence.scenario)).toEqual(
       manifest.cells.map(() => ({ kind: "instance", resultOccurrenceId: null })),
@@ -897,7 +901,9 @@ describe("Code Mode model matrix artifacts", () => {
         JSON.parse(await fs.readFile(path.join(repoRoot, "artifacts", "qa-evidence.json"), "utf8")),
       );
       expect(evidence.schemaVersion).toBe(3);
-      if (evidence.schemaVersion !== 3) throw new Error("expected independently scheduled cells");
+      if (evidence.schemaVersion !== 3) {
+        throw new Error("expected independently scheduled cells");
+      }
       expect(evidence.occurrences).toHaveLength(4);
       expect(new Set(evidence.occurrences.map((occurrence) => occurrence.id)).size).toBe(4);
       expect(evidence.occurrences.every((occurrence) => occurrence.retryOf === null)).toBe(true);

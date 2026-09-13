@@ -118,10 +118,14 @@ export function createQaEvidenceInvocation(params: {
   function previousFailure(index: number) {
     const selected = anchorFor(index).scenario;
     let id = selected?.kind === "instance" ? selected.resultOccurrenceId : null;
-    if (id === null || observationFor(id).terminalStatus !== "fail") return null;
+    if (id === null || observationFor(id).terminalStatus !== "fail") {
+      return null;
+    }
     for (;;) {
       const successor = observations.find((occurrence) => occurrence.retryOf === id);
-      if (!successor) return observationFor(id).terminalStatus === "fail" ? id : null;
+      if (!successor) {
+        return observationFor(id).terminalStatus === "fail" ? id : null;
+      }
       id = successor.id;
     }
   }
@@ -196,8 +200,9 @@ export function createQaEvidenceInvocation(params: {
     if (pending) {
       for (const update of pending.updates) {
         for (const entry of nextEntries) {
-          if (entry.binding.occurrenceId === update.occurrenceId)
+          if (entry.binding.occurrenceId === update.occurrenceId) {
             entry.effective = update.effective;
+          }
         }
       }
       nextObservations.splice(pending.observationOffset, 0, ...structuredClone(pending.additions));
@@ -215,11 +220,13 @@ export function createQaEvidenceInvocation(params: {
       // A nonpassing retry cannot replace the prior failure. Retain both raw
       // attempts while keeping whole-attempt selection with the original owner.
       const previous = byId.get(selected.retryOf);
-      if (!previous) throw new Error("unknown retry predecessor");
+      if (!previous) {
+        throw new Error("unknown retry predecessor");
+      }
       selected = previous;
     }
-    occurrenceId = selected.id;
-    anchor.scenario = { kind: "instance", resultOccurrenceId: occurrenceId };
+    const selectedId = selected.id;
+    anchor.scenario = { kind: "instance", resultOccurrenceId: selectedId };
     // Retrying changes whole-attempt selection, never individual assertion rows.
     let priorId = selected.retryOf;
     while (priorId !== null) {
@@ -232,10 +239,10 @@ export function createQaEvidenceInvocation(params: {
     }
     for (const occurrence of nextObservations) {
       let ancestor = occurrence.retryOf;
-      while (ancestor !== null && ancestor !== occurrenceId) {
+      while (ancestor !== null && ancestor !== selectedId) {
         ancestor = byId.get(ancestor)!.retryOf;
       }
-      if (ancestor === occurrenceId && occurrence.terminalStatus !== "pass") {
+      if (ancestor === selectedId && occurrence.terminalStatus !== "pass") {
         for (const entry of nextEntries) {
           if (entry.binding.occurrenceId === occurrence.id) {
             entry.effective = false;
@@ -254,7 +261,7 @@ export function createQaEvidenceInvocation(params: {
     observations.splice(0, observations.length, ...nextObservations);
     entries.splice(0, entries.length, ...nextEntries);
     pendingChildren.delete(index);
-    return occurrenceId;
+    return selectedId;
   }
 
   function importChild(index: number, input: QaEvidenceSummaryJson) {
@@ -292,15 +299,18 @@ export function createQaEvidenceInvocation(params: {
     const effectiveUpdates: Array<{ occurrenceId: string; effective: boolean }> = [];
     for (const [id] of existing) {
       const previousRows = entries.filter((entry) => entry.binding.occurrenceId === id);
-      if (!incoming.some((occurrence) => occurrence.id === id)) continue;
+      if (!incoming.some((occurrence) => occurrence.id === id)) {
+        continue;
+      }
       const nextRows = child.entries.filter((entry) => entry.binding.occurrenceId === id);
       const immutable = (rows: typeof previousRows) =>
         rows.map(({ effective: _effective, ...row }) => row);
       if (JSON.stringify(immutable(previousRows)) !== JSON.stringify(immutable(nextRows))) {
         throw new Error("child evidence changed an existing observation's rows");
       }
-      if (nextRows.length > 0)
+      if (nextRows.length > 0) {
         effectiveUpdates.push({ occurrenceId: id, effective: nextRows[0]!.effective });
+      }
     }
     const addedIds = new Set(additions.map((occurrence) => occurrence.id));
     if (additions.length > 0) {

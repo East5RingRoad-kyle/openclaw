@@ -315,7 +315,9 @@ describe.skipIf(process.platform === "win32")("onboarding assertion attribution"
       expect(markdown).toContain("Current taxonomy evidence");
 
       const historical = structuredClone(written);
-      if (!historical.profilePlan) throw new Error("expected captured profile plan");
+      if (!historical.profilePlan) {
+        throw new Error("expected captured profile plan");
+      }
       delete historical.profilePlan.taxonomyIdentity;
       const historicalDir = path.join(tempRoot, "historical");
       const historicalOutput = path.join(tempRoot, "historical-rendered");

@@ -201,7 +201,9 @@ it("retains immutable prepared Docker receipts without claiming installed or run
     failFast: true,
     runCommand: async () => ({ exitCode: 0, stdout: "completed", stderr: "" }),
   });
-  if (result.evidence.schemaVersion !== 3) throw new Error("expected occurrence evidence");
+  if (result.evidence.schemaVersion !== 3) {
+    throw new Error("expected occurrence evidence");
+  }
   const receipts = result.evidence.occurrences.flatMap((occurrence) => occurrence.receipts);
   expect(receipts).toContainEqual(first.receipt);
   expect(receipts.every((receipt) => receipt.phase === "prepared")).toBe(true);
