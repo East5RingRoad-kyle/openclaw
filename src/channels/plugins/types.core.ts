@@ -800,7 +800,7 @@ export type ChannelMessageActionAdapter = {
   describeMessageTool: (
     params: ChannelMessageActionDiscoveryContext,
   ) => ChannelMessageToolDiscovery | null | undefined;
-  /** Delegate conversation-read authorization to this adapter for bundled registrations only. */
+  /** Delegate conversation-read admission to the provider for registrations the host permits. */
   providerOwnedReadGates?: true | readonly ChannelMessageActionName[];
   /**
    * Opt into these host-fenced context actions for loader-verified official installs.
