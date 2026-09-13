@@ -83,7 +83,7 @@ export async function runQaRuntimeParitySuite(params: {
       onEvidence: params.onEvidence,
       evidenceMode: params.evidenceMode,
       channelId: params.channelId,
-      channelDriver: params.channelDriver,
+      channelDriver: params.channelDriver ?? undefined,
       channelDriverSelection: params.channelDriverSelection,
     },
     params,
@@ -173,7 +173,7 @@ export async function runQaRuntimeParitySuite(params: {
               let cellResult: QaSuiteResult;
               try {
                 cellResult = await params.runQaFlowSuite(
-                  markQaSuiteNestedRun({
+                  markQaSuiteNestedRun<QaSuiteRunParams>({
                     adapterFactories: params.adapterFactories,
                     channelId: params.channelId,
                     adapterOptions: params.adapterOptions,

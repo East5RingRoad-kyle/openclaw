@@ -433,7 +433,7 @@ function buildExecutionUnits(params: {
     group.push(scenario);
     dockerBatchGroups.set(timeoutMs, group);
   }
-  const batchedScenarios = new Set(dockerBatchScenarios);
+  const batchedScenarios = new Set<QaTestFileScenario>(dockerBatchScenarios);
   const units: QaTestFileExecutionUnit[] = [
     ...[...dockerBatchGroups].map(([timeoutMs, scenarios]) => ({
       kind: "docker-batch" as const,

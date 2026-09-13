@@ -440,7 +440,12 @@ function groupQaScenariosByExecutionCell(
   scenarios: readonly QaSeedScenarioWithSource[],
   cells: readonly QaScenarioExecutionCell[],
 ) {
-  const scenariosById = Map.groupBy(scenarios, (scenario) => scenario.id);
+  const scenariosById = new Map<string, QaSeedScenarioWithSource[]>();
+  for (const scenario of scenarios) {
+    const instances = scenariosById.get(scenario.id) ?? [];
+    instances.push(scenario);
+    scenariosById.set(scenario.id, instances);
+  }
   const positions = new Map<string, number>();
   const groups = new Map<string | undefined, QaSeedScenarioWithSource[]>();
   for (const cell of cells) {
