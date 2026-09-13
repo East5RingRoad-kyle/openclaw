@@ -17,7 +17,7 @@ import { i18n } from "../i18n/index.ts";
 import { SESSION_FACE_PREFERENCE_PARAM } from "../lib/sessions/route-navigation.ts";
 import { createSessionCapabilityHarness } from "../lib/sessions/session-capability.test-support.ts";
 import { createStorageMock } from "../test-helpers/storage.ts";
-import { selectShellRouteState } from "./app-host-route-state.ts";
+import { equalShellRouteState, selectShellRouteState } from "./app-host-route-state.ts";
 import {
   createLazyElementSpec,
   resetAppHostTestGlobals,
@@ -287,7 +287,7 @@ describe("OpenClaw app lifecycle", () => {
     Object.assign(state.matches[0]!, { status: "success", module: { renderSidebar } });
     const sidebar = selectShellRouteState(state).contextualSidebar;
     expect(sidebar?.key).toBe("systems");
-    expect(sidebar?.render()).toBe("Machine inventory");
+    expect(sidebar?.render(sidebar.data, sidebar.loaderPending, true)).toBe("Machine inventory");
     expect(renderSidebar).toHaveBeenCalledWith(data, false, true);
 
     // A cold import keeps the current main page, so its contextual list stays too.
@@ -297,6 +297,28 @@ describe("OpenClaw app lifecycle", () => {
     expect(selectShellRouteState(state).contextualSidebar?.key).toBe("systems");
     Object.assign(state.pendingMatches[0]!, { status: "error", error: new Error("Route failed") });
     expect(selectShellRouteState(state).contextualSidebar).toBeUndefined();
+  });
+
+  it("updates a contextual sidebar when its loader settles without a route change", () => {
+    const renderSidebar = vi.fn(() => "Machine inventory");
+    const state = committedRouterState("systems", "/systems");
+    Object.assign(state.matches[0]!, {
+      status: "pending",
+      module: { renderSidebar },
+      isFetching: "loader",
+    });
+    const pending = selectShellRouteState(state);
+    expect(equalShellRouteState(pending, selectShellRouteState(state))).toBe(true);
+    const data = { source: "Gateway" };
+    Object.assign(state.matches[0]!, { status: "success", data, isFetching: false });
+    const ready = selectShellRouteState(state);
+    expect(equalShellRouteState(pending, ready)).toBe(false);
+    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(true);
+    Object.assign(state.matches[0]!, { data: { source: "Worker" } });
+    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(false);
+    Object.assign(state.matches[0]!, { status: "error", error: new Error("Unavailable") });
+    expect(selectShellRouteState(state).contextualSidebar).toBeUndefined();
+    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(false);
   });
 
   it("hides revealed login credentials when the app connection epoch ends", () => {

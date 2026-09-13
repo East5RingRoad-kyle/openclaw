@@ -3,6 +3,8 @@ import { isSessionRouteId } from "../app-route-paths.ts";
 import type { RouteId } from "../app-routes.ts";
 import { selectRenderedRouteMatch } from "./router-outlet.ts";
 
+type SidebarRenderer = (data: unknown, loaderPending: boolean, presented?: boolean) => unknown;
+
 export type ShellRouteState = {
   routeId?: RouteId;
   routeFailed?: boolean;
@@ -10,7 +12,12 @@ export type ShellRouteState = {
   committedRouteId?: RouteId;
   committedLocation?: RouteLocation;
   committedSessionKey?: string;
-  contextualSidebar?: { key: RouteId; render: () => unknown };
+  contextualSidebar?: {
+    key: RouteId;
+    data: unknown;
+    loaderPending: boolean;
+    render: SidebarRenderer;
+  };
 };
 
 function sessionKeyFromRouteData(routeId: RouteId, data: unknown): string | undefined {
@@ -27,10 +34,7 @@ export function selectShellRouteState(routerState: RouterState<RouteId>): ShellR
   const match = selectRenderedRouteMatch(routerState.matches[0], routerState.pendingMatches[0]);
   const committedMatch = routerState.matches[0];
   const module = match?.module;
-  const renderSidebar =
-    module && typeof module === "object" && "renderSidebar" in module
-      ? module.renderSidebar
-      : undefined;
+  const renderSidebar = hasSidebarRenderer(module) ? module.renderSidebar : undefined;
   const committedSessionKey = committedMatch
     ? sessionKeyFromRouteData(committedMatch.routeId, committedMatch.data)
     : undefined;
@@ -57,9 +61,39 @@ export function selectShellRouteState(routerState: RouterState<RouteId>): ShellR
       ? {
           contextualSidebar: {
             key: match.routeId,
-            render: () => renderSidebar(match.data, match.isFetching === "loader", true),
+            data: match.data,
+            loaderPending: match.isFetching === "loader",
+            render: renderSidebar,
           },
         }
       : {}),
   };
+}
+
+function hasSidebarRenderer(module: unknown): module is { renderSidebar: SidebarRenderer } {
+  return (
+    typeof module === "object" &&
+    module !== null &&
+    "renderSidebar" in module &&
+    typeof module.renderSidebar === "function"
+  );
+}
+
+export function equalShellRouteState(previous: ShellRouteState, next: ShellRouteState): boolean {
+  return (
+    previous.routeId === next.routeId &&
+    previous.routeFailed === next.routeFailed &&
+    previous.location?.pathname === next.location?.pathname &&
+    previous.location?.search === next.location?.search &&
+    previous.location?.hash === next.location?.hash &&
+    previous.committedRouteId === next.committedRouteId &&
+    previous.committedLocation?.pathname === next.committedLocation?.pathname &&
+    previous.committedLocation?.search === next.committedLocation?.search &&
+    previous.committedLocation?.hash === next.committedLocation?.hash &&
+    previous.committedSessionKey === next.committedSessionKey &&
+    previous.contextualSidebar?.key === next.contextualSidebar?.key &&
+    previous.contextualSidebar?.data === next.contextualSidebar?.data &&
+    previous.contextualSidebar?.loaderPending === next.contextualSidebar?.loaderPending &&
+    previous.contextualSidebar?.render === next.contextualSidebar?.render
+  );
 }

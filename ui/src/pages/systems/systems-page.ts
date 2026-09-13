@@ -52,7 +52,9 @@ function renderMeasurements(
   connected: boolean,
 ) {
   const stats = measurements(row);
-  if (!stats) {return html`<p class="systems-no-telemetry">${t("systems.noTelemetry")}</p>`;}
+  if (!stats) {
+    return html`<p class="systems-no-telemetry">${t("systems.noTelemetry")}</p>`;
+  }
   const observedAt = row.node?.hostStats?.updatedAtMs ?? sampledAtMs;
   const lastKnown =
     !connected ||
@@ -119,8 +121,9 @@ class SystemsPage extends OpenClawLightDomElement {
 
   override updated(changed: PropertyValues<this>): void {
     if (changed.has("routeData") || changed.has("presented")) {
-      if (this.activeController !== this.routeData?.controller)
-        {this.activeController?.setPresented(false);}
+      if (this.activeController !== this.routeData?.controller) {
+        this.activeController?.setPresented(false);
+      }
       this.activeController = this.routeData?.controller;
       this.activeController?.setPresented(this.presented);
     }
@@ -128,7 +131,9 @@ class SystemsPage extends OpenClawLightDomElement {
 
   private readonly handleDesktopToggle = (event: Event) => {
     const controller = this.routeData?.controller;
-    if (!this.presented || !controller?.current || !(event instanceof CustomEvent)) {return;}
+    if (!this.presented || !controller?.current || !(event instanceof CustomEvent)) {
+      return;
+    }
     const detail = isRecord(event.detail) ? event.detail : {};
     const environmentId =
       typeof detail.environmentId === "string" ? detail.environmentId : undefined;
@@ -145,7 +150,9 @@ class SystemsPage extends OpenClawLightDomElement {
       }
       return;
     }
-    if (environmentId) {this.querySelector("openclaw-desktop-panel")?.handleToggleRequest(event);}
+    if (environmentId) {
+      this.querySelector("openclaw-desktop-panel")?.handleToggleRequest(event);
+    }
   };
 
   private renderDetails(controller: SystemsController, row: SystemsInventoryRow) {
@@ -188,7 +195,9 @@ class SystemsPage extends OpenClawLightDomElement {
                 class="systems-session-link"
                 href=${target.href}
                 @click=${(event: MouseEvent) => {
-                  if (!shouldHandleNavigationClick(event)) {return;}
+                  if (!shouldHandleNavigationClick(event)) {
+                    return;
+                  }
                   event.preventDefault();
                   controller.context.navigate(face, target.options);
                 }}
@@ -216,8 +225,9 @@ class SystemsPage extends OpenClawLightDomElement {
 
   override render() {
     const controller = this.routeData?.controller;
-    if (!controller?.current)
-      {return html`<p class="systems-state" role="status">${t("systems.loading")}</p>`;}
+    if (!controller?.current) {
+      return html`<p class="systems-state" role="status">${t("systems.loading")}</p>`;
+    }
     const row = controller.selected;
     const canView = Boolean(
       row?.environment.desktop &&
@@ -263,8 +273,9 @@ class SystemsPage extends OpenClawLightDomElement {
           aria-label=${t("systems.select")}
           .value=${controller.selectedId ?? ""}
           @change=${(event: Event) => {
-            if (event.currentTarget instanceof HTMLSelectElement)
-              {controller.select(event.currentTarget.value);}
+            if (event.currentTarget instanceof HTMLSelectElement) {
+              controller.select(event.currentTarget.value);
+            }
           }}
         >
           <option value="" disabled>${t("systems.select")}</option>
@@ -306,10 +317,10 @@ class SystemsPage extends OpenClawLightDomElement {
           ${
             canView && row
               ? html`<openclaw-desktop-panel
+                  embedded
                   data-chat-autotype-exempt
                   .client=${controller.context.gateway.snapshot.client}
                   .available=${controller.desktopAvailable}
-                  .embedded=${true}
                   .presented=${this.presented}
                   .workspaceControls=${true}
                   .suppliedEnvironments=${controller.inventory?.environments ?? []}
@@ -330,8 +341,9 @@ class SystemsPage extends OpenClawLightDomElement {
   }
 }
 
-if (!customElements.get("openclaw-systems-page"))
-  {customElements.define("openclaw-systems-page", SystemsPage);}
+if (!customElements.get("openclaw-systems-page")) {
+  customElements.define("openclaw-systems-page", SystemsPage);
+}
 
 declare global {
   interface HTMLElementTagNameMap {

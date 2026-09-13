@@ -696,7 +696,7 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
               <div class="sidebar-session-content" ?hidden=${Boolean(this.contextualSidebar)}>
                 ${renderAppSidebarOnline(this)} ${this.renderSessions()}
               </div>
-              ${this.contextualSidebar?.render() ?? nothing}
+              ${this.contextualSidebar?.render(this.contextualSidebar.data, this.contextualSidebar.loaderPending, true) ?? nothing}
             </div>
             ${
               this.contextualSidebar || this.sessionsStatusFilter === "archived"

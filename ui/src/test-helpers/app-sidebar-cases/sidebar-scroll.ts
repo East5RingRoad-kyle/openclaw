@@ -15,7 +15,12 @@ describe("AppSidebar session scroll fade", () => {
     expect(scroller.contains(nav)).toBe(false);
     scroller.scrollTop = 75;
     scroller.dispatchEvent(new Event("scroll"));
-    sidebar.contextualSidebar = { key: "systems", render: () => html`<p>Gateway machine</p>` };
+    sidebar.contextualSidebar = {
+      key: "systems",
+      data: undefined,
+      loaderPending: false,
+      render: () => html`<p>Gateway machine</p>`,
+    };
     await sidebar.updateComplete;
     expect(sessions.hidden).toBe(true);
     expect(scroller.textContent).toContain("Gateway machine");
@@ -27,7 +32,12 @@ describe("AppSidebar session scroll fade", () => {
     expect(sidebar.querySelector(".sidebar-session-content")).toBe(sessions);
     expect(sessions.hidden).toBe(false);
     expect(scroller.scrollTop).toBe(75);
-    sidebar.contextualSidebar = { key: "systems", render: () => html`<p>Gateway machine</p>` };
+    sidebar.contextualSidebar = {
+      key: "systems",
+      data: undefined,
+      loaderPending: false,
+      render: () => html`<p>Gateway machine</p>`,
+    };
     await sidebar.updateComplete;
     expect(scroller.scrollTop).toBe(35);
     expect(sidebar.querySelector(".sidebar-nav")).toBe(nav);

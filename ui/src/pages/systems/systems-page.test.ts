@@ -59,10 +59,14 @@ function harness(
   inventory: () => Promise<EnvironmentSummary[]> = async () => [host, worker, offline],
 ) {
   const request = vi.fn(async (method: string) => {
-    if (method === "environments.list") {return { environments: await inventory() };}
-    if (method === "system.info") {return systemInfo;}
-    if (method === "node.list")
-      {return {
+    if (method === "environments.list") {
+      return { environments: await inventory() };
+    }
+    if (method === "system.info") {
+      return systemInfo;
+    }
+    if (method === "node.list") {
+      return {
         nodes: [
           {
             nodeId: "offline",
@@ -75,14 +79,16 @@ function harness(
             },
           },
         ],
-      };}
-    if (method === "desktop.observe")
-      {return {
+      };
+    }
+    if (method === "desktop.observe") {
+      return {
         transport: "rfb",
         wsPath: "/desktop/proof",
         expiresAtMs: Date.now() + 60000,
         control: false,
-      };}
+      };
+    }
     throw new Error("Unexpected request: " + method);
   });
   const gateway = createGatewayHarness({ request } as unknown as GatewayBrowserClient);
@@ -135,6 +141,8 @@ describe("Systems workspace", () => {
       control: false,
     });
     const viewer = page.querySelector("openclaw-desktop-panel");
+    expect(viewer?.hasAttribute("embedded")).toBe(true);
+    expect(viewer?.embedded).toBe(true);
     controller.toggleStats();
     controller.toggleDetails();
     await controller.refresh();
