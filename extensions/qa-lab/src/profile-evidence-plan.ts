@@ -283,6 +283,7 @@ function evaluateProof(
                 break;
               }
               const alternatives = requirement.alternatives.map((alternative) => {
+                // SAFETY: Strict-schema keys match proofDimensions; values are used only in equality comparisons.
                 const dimensions = Object.entries(alternative) as Array<
                   [keyof typeof actual, string]
                 >;

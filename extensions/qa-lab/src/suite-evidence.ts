@@ -162,6 +162,7 @@ export async function createQaSuiteEvidenceInvocation(
     if (createHash("sha256").update(bytes).digest("hex") !== receipt.artifact.sha256) {
       throw new Error("selected flow result artifact changed");
     }
+    // SAFETY: This owner's immutable result artifact matches its recorded hash; selection is checked below.
     const saved = JSON.parse(bytes.toString()) as { result: QaSuiteScenarioResult };
     if (
       saved.result.evidenceOccurrenceId !== selectedId ||
