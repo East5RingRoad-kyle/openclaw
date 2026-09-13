@@ -1,8 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getEffectiveQaEvidenceEntries,
+  projectQaEvidenceScenarioOutcomes,
+  type QaEvidenceSummaryV3Json,
+} from "./evidence-summary.js";
 import { QaGatewayChildLifecycle } from "./gateway-child-lifecycle.js";
 import type { QaLabServerHandle } from "./lab-server.types.js";
+import type { writeQaSuiteArtifacts } from "./suite-artifacts.js";
 import { runQaFlowSuiteStandard } from "./suite-run-standard.js";
 import { makeQaSuiteTestScenario } from "./suite-test-helpers.js";
 import type {
@@ -38,10 +44,11 @@ const mocks = vi.hoisted(() => ({
     cfg: {},
     getProcessCpuMs: () => null,
     getProcessRssBytes: () => null,
+    evidenceIdentity: null as { protocol: number; version: string } | null,
     stop: vi.fn(async () => {}),
   })),
   stopQaGatewayChild: vi.fn<QaGatewayChildLifecycle["stop"]>(),
-  writeQaSuiteArtifacts: vi.fn(async () => ({
+  writeQaSuiteArtifacts: vi.fn<typeof writeQaSuiteArtifacts>(async () => ({
     evidence: undefined,
     evidencePath: "/qa-output/qa-evidence.json",
     report: "",
@@ -52,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   waitForTransportReady: vi.fn(async () => {}),
   runQaFlowSuiteCleanupPlan: vi.fn<typeof runQaFlowSuiteCleanupPlan>(async () => []),
   writeQaSuiteProgress: vi.fn(),
+  runQaSuiteRoundTripProbe: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk/agent-harness", () => ({
@@ -94,6 +102,20 @@ vi.mock("./suite.js", async (importOriginal) => ({
 vi.mock("./web-runtime.js", () => ({
   closeQaWebSessions: vi.fn(async () => {}),
 }));
+vi.mock("./suite-round-trip.js", () => ({
+  runQaSuiteRoundTripProbe: mocks.runQaSuiteRoundTripProbe,
+}));
+vi.mock("./evidence-environment.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./evidence-environment.js")>()),
+  captureQaEvidenceLaunchIdentity: vi.fn(async () => ({
+    source: { ref: "fixture-source", integrity: "fixture-integrity" },
+    runtime: { id: "node", version: "fixture-version" },
+    package: null,
+    protocol: null,
+    accountRef: null,
+    proofClass: "fixture-only",
+  })),
+}));
 
 function makeRetryTestLab(): QaLabServerHandle {
   return {
@@ -111,8 +133,8 @@ function makeRetryTestLab(): QaLabServerHandle {
 function makeRetryTestContext(): QaSuiteResolvedRunContext {
   return {
     startedAt: new Date(),
-    repoRoot: "/qa-repo",
-    outputDir: "/qa-output",
+    repoRoot: testOutputDir,
+    outputDir: testOutputDir,
     transportId: "qa-channel",
     selectedScenarios: [makeQaSuiteTestScenario("runtime-soak-100-turn")],
     providerMode: "live-frontier",
@@ -138,14 +160,17 @@ function makeRetryTestResult(status: "pass" | "fail"): QaSuiteScenarioResult {
 }
 
 const tempDirs = createTempDirHarness();
+let testOutputDir: string;
 
-beforeEach(() => {
+beforeEach(async () => {
+  testOutputDir = await tempDirs.makeTempDir("qa-standard-lifecycle-");
   vi.clearAllMocks();
   mocks.stopQaGatewayChild.mockReset().mockResolvedValue({
     process: "confirmed-stopped",
     errors: [],
   });
   mocks.runQaFlowSuiteCleanupPlan.mockReset().mockResolvedValue([]);
+  mocks.runQaSuiteRoundTripProbe.mockReset();
 });
 
 afterEach(async () => {
@@ -220,6 +245,107 @@ describe("QA suite Control UI ownership", () => {
 });
 
 describe("QA runtime parity scenario retry isolation", () => {
+  it.each(["pass", "fail"] as const)(
+    "records each retry and selects the whole %s attempt",
+    async (status) => {
+      const captured: QaEvidenceSummaryV3Json[] = [];
+      const runScenario = vi
+        .fn<QaSuiteScenarioRunner>()
+        .mockResolvedValueOnce(makeRetryTestResult("fail"))
+        .mockResolvedValueOnce(makeRetryTestResult(status));
+      const result = await runQaFlowSuiteStandard(
+        { lab: makeRetryTestLab(), onEvidence: (summary) => captured.push(summary) },
+        makeRetryTestContext(),
+        runScenario,
+      );
+      const final = captured.at(-1)!;
+      expect(final.schemaVersion).toBe(3);
+      expect(final.entries.map((entry) => entry.result.status)).toEqual(["fail", status]);
+      expect(getEffectiveQaEvidenceEntries(final).map((entry) => entry.result.status)).toEqual([
+        status,
+      ]);
+      expect(projectQaEvidenceScenarioOutcomes(final)[0]).toMatchObject({
+        status,
+        occurrenceId: result.scenarios[0]!.evidenceOccurrenceId,
+      });
+      expect(mocks.writeQaSuiteArtifacts.mock.calls.at(-1)?.[0].recordedEvidence).toMatchObject({
+        occurrences: final.occurrences,
+        entries: final.entries,
+      });
+    },
+  );
+
+  it("captures Gateway facts before cleanup without labelling them as selected harness facts", async () => {
+    let identity: { protocol: number; version: string } | null = {
+      protocol: 3,
+      version: "gateway-fixture",
+    };
+    mocks.startQaGatewayChild.mockResolvedValueOnce({
+      baseUrl: "http://127.0.0.1:18789",
+      token: "qa-test-token",
+      cfg: {},
+      getProcessCpuMs: () => null,
+      getProcessRssBytes: () => null,
+      get evidenceIdentity() {
+        return identity;
+      },
+      stop: vi.fn(async () => {}),
+    });
+    mocks.runQaFlowSuiteCleanupPlan.mockImplementationOnce(async () => {
+      identity = null;
+      return [];
+    });
+    await runQaFlowSuiteStandard(
+      { lab: makeRetryTestLab(), forcedRuntime: "codex" },
+      makeRetryTestContext(),
+      vi.fn<QaSuiteScenarioRunner>().mockResolvedValue(makeRetryTestResult("pass")),
+    );
+    const summary = mocks.writeQaSuiteArtifacts.mock.calls.at(-1)![0].recordedEvidence!;
+    expect(summary.schemaVersion).toBe(3);
+    if (summary.schemaVersion !== 3) throw new Error("expected occurrences");
+    const receipts = summary.occurrences.flatMap((occurrence) => occurrence.receipts);
+    expect(receipts.find((receipt) => receipt.phase === "runtime")?.identity).toEqual({
+      source: { ref: null, integrity: null },
+      runtime: { id: "openclaw", version: "gateway-fixture" },
+      package: null,
+      protocol: "gateway:3",
+      accountRef: null,
+      proofClass: null,
+    });
+    expect(identity).toBeNull();
+  });
+
+  it("retains a pass and a separate parent failure when the post-run probe throws", async () => {
+    const context = makeRetryTestContext();
+    const captured: QaEvidenceSummaryV3Json[] = [];
+    const error = new Error("post-run probe failed");
+    mocks.runQaSuiteRoundTripProbe.mockRejectedValueOnce(error);
+    await expect(
+      runQaFlowSuiteStandard(
+        {
+          lab: makeRetryTestLab(),
+          onEvidence: (summary) => captured.push(summary),
+          roundTripProbe: {
+            scenarioId: context.selectedScenarios[0]!.id,
+            count: 1,
+            maxFailures: 1,
+            timeoutMs: 100,
+            markerPrefix: "fixture",
+            textPrefix: "fixture",
+            input: { conversation: { kind: "dm", id: "fixture" }, senderId: "fixture" },
+          },
+        },
+        context,
+        vi.fn<QaSuiteScenarioRunner>().mockResolvedValue(makeRetryTestResult("pass")),
+      ),
+    ).rejects.toBe(error);
+    const summary = captured.at(-1)!;
+    expect(summary.entries.map((entry) => entry.result.status)).toEqual(["pass", "fail"]);
+    expect(summary.entries[1]?.coverage).toEqual([]);
+    expect(projectQaEvidenceScenarioOutcomes(summary)[0]?.status).toBe("fail");
+    expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])(
     "preserves runner progress through cleanup (failFast=%s)",
     async (failFast) => {

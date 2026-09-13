@@ -50,25 +50,23 @@ function normalizeScriptProducerEvidence(params: {
   repoRoot: string;
 }): QaEvidenceSummaryJson {
   const evidenceDir = path.dirname(params.evidencePath);
-  return {
-    ...params.evidence,
-    entries: params.evidence.entries.map((entry) => ({
-      ...entry,
-      execution: entry.execution
-        ? {
-            ...entry.execution,
-            artifacts: entry.execution.artifacts.map((artifact) => ({
-              ...artifact,
-              path: resolveScriptProducerArtifactPath({
-                artifactPath: artifact.path,
-                evidenceDir,
-                repoRoot: params.repoRoot,
-              }),
-            })),
-          }
-        : undefined,
-    })),
-  };
+  const evidence = structuredClone(params.evidence);
+  const artifacts = [
+    ...evidence.entries.flatMap((entry) => entry.execution?.artifacts ?? []),
+    ...(evidence.schemaVersion === 3
+      ? evidence.occurrences.flatMap((occurrence) =>
+          occurrence.receipts.map((receipt) => receipt.artifact),
+        )
+      : []),
+  ];
+  for (const artifact of artifacts) {
+    artifact.path = resolveScriptProducerArtifactPath({
+      artifactPath: artifact.path,
+      evidenceDir,
+      repoRoot: params.repoRoot,
+    });
+  }
+  return validateQaEvidenceSummaryJson(evidence);
 }
 
 function assertScenarioOwnsEvidencePath(scenarioOutputDir: string, evidencePath: string): void {
@@ -134,7 +132,7 @@ export async function readScriptProducerEvidence(params: {
       );
     }
     const rawEvidence = await readJsonFileIfExists(evidencePath);
-    if (!rawEvidence) {
+    if (rawEvidence === undefined) {
       continue;
     }
     const evidence = validateQaEvidenceSummaryJson(rawEvidence);

@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   dockerLaneName,
   dockerE2eLaneName,
   prepareDockerE2eEnvironment,
+  type QaPreparedDockerEvidence,
 } from "./test-file-scenario-docker-batch.js";
 import {
   runQaTestFileScenarios,
@@ -15,6 +18,7 @@ import {
   createScenarioRunnerTestHarness,
   makeDockerE2eScenario,
   makeTestFileScenario,
+  resolveScriptAttemptOutputDir,
   writeDockerCandidateManifest,
   writeScriptProducerEvidence,
 } from "./test-file-scenario-runner.test-support.js";
@@ -149,6 +153,112 @@ it("returns a sanitized bound env for a package-free candidate", async () => {
 
   expect(env).toEqual({ KEEP_ME: "yes", OPENCLAW_DOCKER_E2E_REPO_ROOT: repoRoot });
   expect(Object.isFrozen(env)).toBe(true);
+});
+
+it("retains immutable prepared Docker receipts without claiming installed or runtime proof", async () => {
+  const repoRoot = await makeTempRepo("qa-docker-prepared-evidence-");
+  const scenario = makeDockerE2eScenario("one", "gateway-network");
+  const captured: QaPreparedDockerEvidence[] = [];
+  const prepare = async () =>
+    prepareDockerE2eEnvironment({
+      env: {},
+      repoRoot,
+      outputDir: path.join(repoRoot, "prep"),
+      scenarios: [scenario],
+      onPrepared: (evidence) => captured.push(evidence),
+      runCommand: (command) =>
+        writeDockerCandidateManifest(command, {
+          schema: "openclaw.qa-docker-candidate/v1",
+          schemaVersion: 1,
+          sourceSha: "a".repeat(40),
+          candidate: {
+            package: {
+              path: path.join(repoRoot, "candidate.tgz"),
+              name: "openclaw",
+              version: "2026.8.1",
+              sha256: "b".repeat(64),
+            },
+            registry: null,
+          },
+        }),
+    });
+  const env = await prepare();
+  const first = captured[0]!;
+  const firstPath = path.resolve(repoRoot, first.receipt.artifact.path);
+  const original = await fs.readFile(firstPath);
+  await prepare();
+  expect(captured[1]?.receipt.artifact.path).not.toBe(first.receipt.artifact.path);
+  expect(await fs.readFile(firstPath)).toEqual(original);
+  expect(createHash("sha256").update(original).digest("hex")).toBe(first.receipt.artifact.sha256);
+  const result = await runQaTestFileScenarios({
+    ...QA_TEST_RUNNER_DEFAULTS,
+    repoRoot,
+    outputDir: path.join(repoRoot, "run"),
+    env,
+    envMode: "replace",
+    preparedDockerEvidence: first,
+    scenarios: [scenario],
+    failFast: true,
+    runCommand: async () => ({ exitCode: 0, stdout: "completed", stderr: "" }),
+  });
+  if (result.evidence.schemaVersion !== 3) throw new Error("expected occurrence evidence");
+  const receipts = result.evidence.occurrences.flatMap((occurrence) => occurrence.receipts);
+  expect(receipts).toContainEqual(first.receipt);
+  expect(receipts.every((receipt) => receipt.phase === "prepared")).toBe(true);
+  expect(first.receipt.identity).toEqual({
+    source: { ref: "a".repeat(40), integrity: null },
+    runtime: { id: null, version: null },
+    package: {
+      kind: "npm-tarball",
+      spec: "openclaw",
+      version: "2026.8.1",
+      integrity: `sha256:${"b".repeat(64)}`,
+    },
+    protocol: null,
+    accountRef: null,
+    proofClass: null,
+  });
+  const launch = {
+    ...first.receipt.identity,
+    source: { ref: "a".repeat(40), integrity: null },
+    package: null,
+  };
+  for (const mismatch of ["package", "source"] as const) {
+    const runCommand = vi.fn(async () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const owner = createQaEvidenceInvocation({
+      scenarios: [scenario],
+      channel: null,
+      launch: {
+        ...launch,
+        source: {
+          ...launch.source,
+          ref: mismatch === "source" ? "c".repeat(40) : launch.source.ref,
+        },
+      },
+    });
+    await expect(
+      runQaTestFileScenarios({
+        ...QA_TEST_RUNNER_DEFAULTS,
+        repoRoot,
+        outputDir: path.join(repoRoot, mismatch),
+        env: {
+          ...env,
+          ...(mismatch === "package" ? { OPENCLAW_CURRENT_PACKAGE_SHA256: "d".repeat(64) } : {}),
+        },
+        envMode: "replace",
+        preparedDockerEvidence: first,
+        evidenceAnchors: owner.anchors,
+        scenarios: [scenario],
+        failFast: true,
+        runCommand,
+      }),
+    ).rejects.toThrow(
+      mismatch === "package"
+        ? "Docker child environment differs"
+        : "Docker candidate source differs",
+    );
+    expect(runCommand).not.toHaveBeenCalled();
+  }
 });
 
 it.each([
@@ -320,7 +430,7 @@ describe("qa test file scenario runner", () => {
             );
           } else {
             await writeScriptProducerEvidence({
-              outputDir,
+              outputDir: resolveScriptAttemptOutputDir(command),
               producerId: scenarioId,
               scenarioId,
               status: "pass",
@@ -372,7 +482,7 @@ describe("qa test file scenario runner", () => {
       scenarios,
       runCommand: async (command) => {
         commands.push(command);
-        await expect(fs.access(staleSummaryPath)).rejects.toThrow();
+        expect(await fs.readFile(staleSummaryPath, "utf8")).toBe('{"status":"passed"}\n');
         const logDir = command.env.OPENCLAW_DOCKER_ALL_LOG_DIR;
         if (!logDir) {
           throw new Error("missing Docker scheduler log dir");

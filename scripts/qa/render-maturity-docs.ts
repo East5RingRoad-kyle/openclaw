@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  getEffectiveQaEvidenceEntries,
   validateQaEvidenceSummaryJson,
   type QaEvidenceScorecardJson,
   type QaEvidenceStatus,
@@ -847,14 +848,15 @@ function readEvidenceSummaries(
   const identity = qaMaturityTaxonomyIdentity(taxonomy);
   return collectQaEvidenceFiles(evidenceDir).map((filePath) => {
     const payload = validateQaEvidenceSummaryJson(JSON.parse(fs.readFileSync(filePath, "utf8")));
+    const entries = getEffectiveQaEvidenceEntries(payload);
     return {
       sourcePath: filePath,
       path: path.relative(process.cwd(), filePath),
       generatedAt: payload.generatedAt,
       profile: payload.profile ?? "",
-      entryCount: payload.entries.length,
-      statuses: countStatuses(payload.entries),
-      blockingResults: blockingResultLabels(payload.entries),
+      entryCount: entries.length,
+      statuses: countStatuses(entries),
+      blockingResults: blockingResultLabels(entries),
       scorecard: payload.scorecard,
       taxonomyStatus: !payload.profilePlan?.taxonomyIdentity
         ? "unknown"

@@ -10,6 +10,7 @@ import {
   resolveQaEvidenceArtifactFile,
   resolveQaEvidenceProducerFile,
 } from "./evidence-gallery.js";
+import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   QA_EVIDENCE_FILENAME,
   buildVitestEvidenceSummary,
@@ -74,6 +75,64 @@ function vitestArtifactEvidence(params: {
 }
 
 describe("evidence gallery", () => {
+  it("keeps duplicate labels and raw artifact indices while counting only the selected retry", async () => {
+    const repoRoot = await createTempRepo();
+    try {
+      const outputDir = path.join(repoRoot, "evidence");
+      await fs.mkdir(outputDir);
+      const invocation = createQaEvidenceInvocation({
+        scenarios: [{ id: "same-label", execution: { kind: "script" } }],
+        channel: null,
+        launch: {
+          source: { ref: null, integrity: null },
+          runtime: { id: null, version: null },
+          package: null,
+          protocol: null,
+          accountRef: null,
+          proofClass: null,
+        },
+      });
+      let prior: string | null = null;
+      for (const [index, status] of (["fail", "pass"] as const).entries()) {
+        const occurrenceId = invocation.begin(0, prior);
+        const file = `attempt-${index}.log`;
+        await fs.writeFile(path.join(outputDir, file), `observed attempt ${index}`);
+        const summary = vitestArtifactEvidence({
+          id: "same-label",
+          title: `Attempt ${index}`,
+          artifact: { kind: "log", path: file },
+        });
+        summary.entries[0]!.result = { status };
+        invocation.complete(occurrenceId, { status, entries: summary.entries });
+        prior = occurrenceId;
+      }
+      invocation.select(0, prior!);
+      const evidence = invocation.snapshot({ generatedAt: "2026-06-17T12:00:00.000Z" });
+      const evidencePath = path.join(outputDir, QA_EVIDENCE_FILENAME);
+      await writeJson(evidencePath, evidence);
+      const original = await fs.readFile(evidencePath, "utf8");
+      const model = await buildQaEvidenceGalleryModel({ evidencePath, repoRoot });
+      expect(model.counts).toEqual({ pass: 1, fail: 0, blocked: 0, skipped: 0 });
+      expect(model.entries.map(({ key, id, effective }) => ({ key, id, effective }))).toEqual([
+        { key: "0", id: "same-label", effective: false },
+        { key: "1", id: "same-label", effective: true },
+      ]);
+      for (const [index, entry] of model.entries.entries()) {
+        expect(entry.artifacts[0]?.href).toContain(`entryIndex=${index}&artifactIndex=0`);
+        const artifact = await resolveQaEvidenceArtifactFileByIndex({
+          artifactIndex: 0,
+          entryIndex: index,
+          evidencePath,
+          repoRoot,
+        });
+        expect(await fs.readFile(artifact, "utf8")).toBe(`observed attempt ${index}`);
+      }
+      expect(await fs.readFile(evidencePath, "utf8")).toBe(original);
+    } finally {
+      await fs.rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("builds a generic gallery model for non-UX QA Lab evidence", async () => {
     const repoRoot = await createTempRepo();
     const outputDir = path.join(repoRoot, ".artifacts", "qa-e2e", "vitest");
@@ -648,6 +707,7 @@ describe("evidence gallery", () => {
         status: "pass",
         surface: "web-ui",
         testId: "ux-matrix.web-ui.first-run",
+        entryKey: "0",
         title: "UX Matrix: web-ui / first-run at <repo-root>",
       },
       {
@@ -665,6 +725,7 @@ describe("evidence gallery", () => {
         status: "proof-gap",
         surface: "cli",
         testId: null,
+        entryKey: null,
         title: null,
       },
       {
@@ -676,6 +737,7 @@ describe("evidence gallery", () => {
         status: "blocked",
         surface: "cli",
         testId: "qa-lab.wrapper-cli-error",
+        entryKey: "1",
         title: "UX Matrix: cli / error-state",
       },
     ]);

@@ -1,5 +1,7 @@
 import path from "node:path";
 import type { OpenClawCrablineChannelDriverSelection } from "@openclaw/crabline";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import type { QaEvidenceSummaryV3Json } from "./evidence-summary.js";
 import type { QaCliBackendAuthMode } from "./gateway-child.js";
 import type { QaLabLatestReport, QaLabServerHandle } from "./lab-server.types.js";
 import type { QaProviderMode } from "./model-selection.js";
@@ -14,6 +16,7 @@ import {
 import { readQaBootstrapScenarioCatalog } from "./scenario-catalog.js";
 import type { QaScorecardChannelDriver, QaScorecardEvidenceMode } from "./scorecard-taxonomy.js";
 import { writeQaSuiteArtifacts } from "./suite-artifacts.js";
+import { createQaSuiteEvidenceInvocation, rebaseQaSuiteEvidence } from "./suite-evidence.js";
 import {
   collectQaSuiteTransportPolicy,
   mapQaSuiteWithConcurrency,
@@ -69,7 +72,22 @@ export async function runQaRuntimeParitySuite(params: {
   sutOpenClawCommand?: QaSuiteRunParams["sutOpenClawCommand"];
   mutateConfig?: QaSuiteRunParams["mutateConfig"];
   writeEvidenceFile?: boolean;
+  evidenceAnchors?: QaSuiteRunParams["evidenceAnchors"];
+  evidenceContinuation?: QaSuiteRunParams["evidenceContinuation"];
+  onEvidence?: QaSuiteRunParams["onEvidence"];
 }) {
+  const recording = await createQaSuiteEvidenceInvocation(
+    {
+      evidenceAnchors: params.evidenceAnchors,
+      evidenceContinuation: params.evidenceContinuation,
+      onEvidence: params.onEvidence,
+      evidenceMode: params.evidenceMode,
+      channelId: params.channelId,
+      channelDriver: params.channelDriver,
+      channelDriverSelection: params.channelDriverSelection,
+    },
+    params,
+  );
   const ownsLab = !params.lab;
   const startLab = requireQaSuiteStartLab(params.startLab);
   const lab =
@@ -123,104 +141,195 @@ export async function runQaRuntimeParitySuite(params: {
           `runtime pair start (${index + 1}/${params.selectedScenarios.length}): ${scenarioIdForLog}`,
         );
         progress.markRunning([scenario.id]);
+        const anchor = recording.invocation.anchors[index]!;
+        const comparisonId = recording.invocation.begin(index);
+        let recordingComparison = false;
+        try {
+          const parity = await runRuntimeParityScenario({
+            scenarioId: scenario.id,
+            runtimeParityUsage: scenario.runtimeParityUsage,
+            runtimePair: params.runtimePair,
+            runCell: async (runtime) => {
+              const cellOutputDir = path.join(
+                params.outputDir,
+                "runtime-cells",
+                anchor.id,
+                comparisonId,
+                runtime,
+              );
+              const dispatchId = recording.invocation.begin(index, null);
+              const cellStartedAt = Date.now();
+              let childEvidence: QaEvidenceSummaryV3Json | undefined;
+              const importChild = () => {
+                if (!childEvidence) return null;
+                const selected = recording.invocation.importChild(
+                  index,
+                  rebaseQaSuiteEvidence(childEvidence, cellOutputDir, params.outputDir),
+                );
+                if (selected) recording.invocation.select(index, selected);
+                recording.publish();
+                return selected;
+              };
+              let cellResult: QaSuiteResult;
+              try {
+                cellResult = await params.runQaFlowSuite(
+                  markQaSuiteNestedRun({
+                    adapterFactories: params.adapterFactories,
+                    channelId: params.channelId,
+                    adapterOptions: params.adapterOptions,
+                    repoRoot: params.repoRoot,
+                    outputDir: cellOutputDir,
+                    providerMode: params.providerMode,
+                    transportId: params.transportId,
+                    channelDriver: params.channelDriver ?? undefined,
+                    channelDriverSelection: params.channelDriverSelection,
+                    primaryModel: remapModelRefForForcedRuntime({
+                      modelRef: params.primaryModel,
+                      providerMode: params.providerMode,
+                      forcedRuntime: runtime,
+                    }),
+                    alternateModel: remapModelRefForForcedRuntime({
+                      modelRef: params.alternateModel,
+                      providerMode: params.providerMode,
+                      forcedRuntime: runtime,
+                    }),
+                    fastMode: params.fastMode,
+                    thinkingDefault: params.thinkingDefault,
+                    claudeCliAuthMode: params.claudeCliAuthMode,
+                    scenarioIds: [scenario.id],
+                    concurrency: 1,
+                    enabledPluginIds: params.enabledPluginIds,
+                    startLab,
+                    controlUiEnabled:
+                      params.controlUiEnabled ?? scenarioRequiresControlUi(scenario),
+                    mutateConfig: params.mutateConfig,
+                    sutOpenClawCommand: params.sutOpenClawCommand,
+                    forcedRuntime: runtime,
+                    captureRuntimeParityCell: true,
+                    writeEvidenceFile: params.writeEvidenceFile,
+                    // A different runtime is an independent observation, not a retry
+                    // of the preceding runtime's result or selected comparison.
+                    evidenceAnchors: [
+                      { ...anchor, scenario: { kind: "instance", resultOccurrenceId: null } },
+                    ],
+                    onEvidence: (summary) => {
+                      childEvidence = structuredClone(summary);
+                    },
+                  }),
+                );
+              } catch (error) {
+                try {
+                  importChild();
+                } catch (reconciliationError) {
+                  throw new AggregateError(
+                    [error, reconciliationError],
+                    "runtime parity child and evidence reconciliation failed",
+                  );
+                }
+                throw error;
+              }
+              if (cellResult.evidence?.schemaVersion === 3) {
+                childEvidence = cellResult.evidence;
+              }
+              const childSelectedId = importChild();
+              for (const startedScenarioId of cellResult.startedScenarioIds) {
+                startedScenarioIds.add(startedScenarioId);
+              }
+              let scenarioResult =
+                cellResult.scenarios[0] ??
+                ({
+                  name: scenario.title,
+                  status: "fail",
+                  details: "runtime parity cell returned no scenario result",
+                  steps: [
+                    {
+                      name: "runtime parity cell",
+                      status: "fail",
+                      details: "runtime parity cell returned no scenario result",
+                    },
+                  ],
+                } satisfies QaSuiteScenarioResult);
+              if (childEvidence) {
+                if (!childSelectedId || scenarioResult.evidenceOccurrenceId !== childSelectedId) {
+                  throw new Error("runtime parity result does not match its child observation");
+                }
+                recording.invocation.complete(dispatchId, {
+                  status: scenarioResult.status === "skip" ? "skipped" : scenarioResult.status,
+                  entries: [],
+                });
+                recording.publish();
+              } else {
+                // Only this just-returned child can supply legacy rows. Keep their
+                // complete contents; runtime labels do not establish target proof.
+                const legacy = cellResult.evidence
+                  ? rebaseQaSuiteEvidence(cellResult.evidence, cellOutputDir, params.outputDir)
+                  : undefined;
+                scenarioResult = await recording.record(index, dispatchId, scenarioResult, {
+                  importedEntries: legacy?.entries,
+                });
+              }
+              const fallbackCell = {
+                runtime,
+                transcriptBytes: "",
+                toolCalls: [],
+                finalText: "",
+                usage: {
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  totalTokens: 0,
+                },
+                wallClockMs: Math.max(1, Date.now() - cellStartedAt),
+                runtimeErrorClass: "capture-missing",
+                bootStateLines: [],
+              } satisfies RuntimeParityCell;
+              return {
+                status: scenarioResult.status,
+                details: scenarioResult.details,
+                cell: cellResult.runtimeParityCell ?? fallbackCell,
+              };
+            },
+          });
 
-        const parity = await runRuntimeParityScenario({
-          scenarioId: scenario.id,
-          runtimeParityUsage: scenario.runtimeParityUsage,
-          runtimePair: params.runtimePair,
-          runCell: async (runtime) => {
-            const cellOutputDir = path.join(
-              params.outputDir,
-              "runtime-cells",
-              scenario.id,
-              runtime,
-            );
-            const cellStartedAt = Date.now();
-            const cellResult = await params.runQaFlowSuite(
-              markQaSuiteNestedRun({
-                adapterFactories: params.adapterFactories,
-                channelId: params.channelId,
-                adapterOptions: params.adapterOptions,
-                repoRoot: params.repoRoot,
-                outputDir: cellOutputDir,
-                providerMode: params.providerMode,
-                transportId: params.transportId,
-                channelDriver: params.channelDriver ?? undefined,
-                channelDriverSelection: params.channelDriverSelection,
-                primaryModel: remapModelRefForForcedRuntime({
-                  modelRef: params.primaryModel,
-                  providerMode: params.providerMode,
-                  forcedRuntime: runtime,
-                }),
-                alternateModel: remapModelRefForForcedRuntime({
-                  modelRef: params.alternateModel,
-                  providerMode: params.providerMode,
-                  forcedRuntime: runtime,
-                }),
-                fastMode: params.fastMode,
-                thinkingDefault: params.thinkingDefault,
-                claudeCliAuthMode: params.claudeCliAuthMode,
-                scenarioIds: [scenario.id],
-                concurrency: 1,
-                enabledPluginIds: params.enabledPluginIds,
-                startLab,
-                controlUiEnabled: params.controlUiEnabled ?? scenarioRequiresControlUi(scenario),
-                mutateConfig: params.mutateConfig,
-                sutOpenClawCommand: params.sutOpenClawCommand,
-                forcedRuntime: runtime,
-                captureRuntimeParityCell: true,
-                writeEvidenceFile: params.writeEvidenceFile,
-              }),
-            );
-            for (const startedScenarioId of cellResult.startedScenarioIds) {
-              startedScenarioIds.add(startedScenarioId);
+          const parityResult = buildRuntimeParityScenarioResult({
+            scenarioName: scenario.title,
+            result: parity,
+          });
+          recordingComparison = true;
+          const parityScenarioResult = await recording.record(index, comparisonId, parityResult, {
+            diagnostic: true,
+          });
+          progress.recordScenarioResult(scenario.id, parityScenarioResult);
+          writeQaSuiteProgress(
+            params.progressEnabled,
+            `runtime pair ${parityScenarioResult.status} (${index + 1}/${params.selectedScenarios.length}): ${scenarioIdForLog}`,
+          );
+          return parityScenarioResult;
+        } catch (error) {
+          // A comparison failure owns a separate zero-claim diagnostic; already
+          // captured child observations survive without inventing a child result.
+          if (!recordingComparison) {
+            const details = formatErrorMessage(error);
+            try {
+              await recording.record(
+                index,
+                comparisonId,
+                {
+                  name: scenario.title,
+                  status: "fail",
+                  details,
+                  steps: [{ name: "runtime parity", status: "fail", details }],
+                },
+                { diagnostic: true },
+              );
+            } catch (recordError) {
+              throw new AggregateError(
+                [error, recordError],
+                "runtime parity and evidence publication failed",
+              );
             }
-            const scenarioResult =
-              cellResult.scenarios[0] ??
-              ({
-                name: scenario.title,
-                status: "fail",
-                details: "runtime parity cell returned no scenario result",
-                steps: [
-                  {
-                    name: "runtime parity cell",
-                    status: "fail",
-                    details: "runtime parity cell returned no scenario result",
-                  },
-                ],
-              } satisfies QaSuiteScenarioResult);
-            const fallbackCell = {
-              runtime,
-              transcriptBytes: "",
-              toolCalls: [],
-              finalText: "",
-              usage: {
-                inputTokens: 0,
-                outputTokens: 0,
-                totalTokens: 0,
-              },
-              wallClockMs: Math.max(1, Date.now() - cellStartedAt),
-              runtimeErrorClass: "capture-missing",
-              bootStateLines: [],
-            } satisfies RuntimeParityCell;
-            return {
-              status: scenarioResult.status,
-              details: scenarioResult.details,
-              cell: cellResult.runtimeParityCell ?? fallbackCell,
-            };
-          },
-        });
-
-        const parityScenarioResult = buildRuntimeParityScenarioResult({
-          scenarioName: scenario.title,
-          result: parity,
-        });
-        progress.recordScenarioResult(scenario.id, parityScenarioResult);
-        writeQaSuiteProgress(
-          params.progressEnabled,
-          `runtime pair ${parityScenarioResult.status} (${index + 1}/${params.selectedScenarios.length}): ${scenarioIdForLog}`,
-        );
-        return parityScenarioResult;
+          }
+          throw error;
+        }
       },
       {
         startStaggerMs: resolveQaSuiteWorkerStartStaggerMs(params.concurrency),
@@ -239,6 +348,7 @@ export async function runQaRuntimeParitySuite(params: {
           scenarios,
           scenarioDefinitions: params.selectedScenarios,
           evidenceMode: params.evidenceMode,
+          recordedEvidence: recording.snapshot(),
           transport,
           providerMode: params.providerMode,
           primaryModel: params.primaryModel,

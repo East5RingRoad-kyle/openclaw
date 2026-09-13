@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { validateQaEvidenceSummaryJson } from "./evidence-summary.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
 import { attachQaProfileScorecardEvidenceToFile } from "./scorecard-evidence.js";
+import { qaMaturityTaxonomyIdentity, readQaMaturityTaxonomySource } from "./scorecard-taxonomy.js";
 import { runQaTestFileScenarios } from "./test-file-scenario-runner.js";
 import {
   buildScriptProducerEvidence,
   createScenarioRunnerTestHarness,
   makeTestFileScenario,
+  resolveScriptAttemptOutputDir,
   writeScriptProducerEvidence,
   QA_TEST_RUNNER_DEFAULTS,
 } from "./test-file-scenario-runner.test-support.js";
@@ -51,9 +53,9 @@ describe("producer coverage claims", () => {
         ...QA_TEST_RUNNER_DEFAULTS,
         evidenceMode,
         scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-        runCommand: async () => {
+        runCommand: async (command) => {
           await writeScriptProducerEvidence({
-            outputDir,
+            outputDir: resolveScriptAttemptOutputDir(command),
             coverage: [],
             producerId: "failed-diagnostic",
             failureReason: "boundary failed without a coverage claim",
@@ -92,7 +94,13 @@ describe("producer coverage claims", () => {
             artifacts: [
               {
                 ...original.execution?.artifacts[0],
-                path: "out/scenario-script/run-1/producer.log",
+                path: path.relative(
+                  repoRoot,
+                  path.join(
+                    path.dirname(result.results[0]!.logPath),
+                    "scenario-script/run-1/producer.log",
+                  ),
+                ),
               },
             ],
           });
@@ -131,96 +139,7 @@ describe.skipIf(process.platform === "win32")("onboarding assertion attribution"
         "cli.remote-onboarding",
         "cli.targeted-reconfiguration",
       ];
-      const result = await runQaTestFileScenarios({
-        repoRoot,
-        outputDir,
-        ...QA_TEST_RUNNER_DEFAULTS,
-        evidenceMode,
-        scenarios: [scenario],
-        env: { PATH: `${binDir}${path.delimiter}${process.env.PATH}` },
-      });
-      expect(result.results[0]).toMatchObject({
-        status: "fail",
-        failureMessage: `${path.basename(process.execPath)} exited with 7`,
-        includeFallbackEvidence: true,
-      });
-      expect(result.evidence.entries.map((entry) => [entry.test.id, entry.result.status])).toEqual([
-        ["cli-gateway-auth-storage", "fail"],
-        ["cli-guided-onboarding", "pass"],
-        ["cli-remote-onboarding", "fail"],
-        ["cli-targeted-reconfiguration", "fail"],
-        ["cli-onboarding", "fail"],
-      ]);
       const features = coverageIds.map((id) => ({ name: id, coverageIds: [id] }));
-      const scorecard = await attachQaProfileScorecardEvidenceToFile({
-        evidencePath: result.evidencePath,
-        evidenceMode,
-        profile: "all",
-        profilePlan: {
-          profile: "all",
-          membership: [],
-          selected: [],
-          excluded: [],
-          expectedCells: [],
-          observedCells: [],
-          missingCells: [],
-          counts: {
-            membership: 0,
-            selected: 0,
-            excluded: 0,
-            expectedCells: 0,
-            observedCells: 0,
-            missingCells: 0,
-          },
-        },
-        filters: {},
-        categories: [
-          {
-            id: "cli.onboarding-and-auth-setup",
-            taxonomySurfaceId: "cli",
-            taxonomyCategoryName: "Onboarding",
-            inventoryStatus: "complete",
-            profiles: ["all"],
-            features,
-            coverageIds,
-            inventoriedCoverageIds: coverageIds,
-            inventoryRefs: [],
-            scenarioRefs: [],
-            missingCoverageIds: [],
-            missingInventoryRefs: [],
-          },
-        ],
-      });
-      expect(scorecard.coverageIds).toEqual({
-        total: 4,
-        fulfilled: 1,
-        missing: 3,
-        fulfillmentPercent: 25,
-      });
-      const producer = result.results[0]?.producerEvidence;
-      expect(producer?.entries.map((entry) => entry.coverage)).toEqual(
-        coverageIds.map((id) => [{ id, role: "primary" }]),
-      );
-      for (const [index, original] of (producer?.entries ?? []).entries()) {
-        const imported = result.evidence.entries[index];
-        expect(imported?.test).toEqual(original.test);
-        expect(imported?.result).toEqual(original.result);
-        expect(imported?.coverage).toEqual(original.coverage);
-        expect(imported?.execution).toEqual(
-          evidenceMode === "slim" ? undefined : original.execution,
-        );
-      }
-      for (const index of [0, 2, 3]) {
-        expect(result.evidence.entries[index]?.result.failure?.reason).toContain(
-          "missing executable assertion marker(s):",
-        );
-      }
-      const written = validateQaEvidenceSummaryJson(
-        JSON.parse(await fs.readFile(result.evidencePath, "utf8")),
-      );
-      expect(written.entries).toEqual(result.evidence.entries);
-      expect(written.evidenceMode).toBe(evidenceMode);
-
       const taxonomyPath = path.join(tempRoot, "taxonomy.json");
       const scoresPath = path.join(tempRoot, "scores.json");
       const surface = { id: "cli", name: "CLI", family: "core", level: "experimental" };
@@ -273,6 +192,98 @@ describe.skipIf(process.platform === "win32")("onboarding assertion attribution"
           ],
         }),
       );
+      const profilePlan = {
+        profile: "all" as const,
+        taxonomyIdentity: qaMaturityTaxonomyIdentity(readQaMaturityTaxonomySource(taxonomyPath)),
+        membership: [],
+        selected: [],
+        excluded: [],
+        expectedCells: [],
+        observedCells: [],
+        missingCells: [],
+        counts: {
+          membership: 0,
+          selected: 0,
+          excluded: 0,
+          expectedCells: 0,
+          observedCells: 0,
+          missingCells: 0,
+        },
+      };
+      const result = await runQaTestFileScenarios({
+        repoRoot,
+        outputDir,
+        ...QA_TEST_RUNNER_DEFAULTS,
+        evidenceMode,
+        scenarios: [scenario],
+        env: { PATH: `${binDir}${path.delimiter}${process.env.PATH}` },
+      });
+      expect(result.results[0]).toMatchObject({
+        status: "fail",
+        failureMessage: `${path.basename(process.execPath)} exited with 7`,
+        includeFallbackEvidence: true,
+      });
+      expect(result.evidence.entries.map((entry) => [entry.test.id, entry.result.status])).toEqual([
+        ["cli-gateway-auth-storage", "fail"],
+        ["cli-guided-onboarding", "pass"],
+        ["cli-remote-onboarding", "fail"],
+        ["cli-targeted-reconfiguration", "fail"],
+        ["cli-onboarding", "fail"],
+      ]);
+      const scorecard = await attachQaProfileScorecardEvidenceToFile({
+        evidencePath: result.evidencePath,
+        evidenceMode,
+        profile: "all",
+        profilePlan,
+        filters: {},
+        categories: [
+          {
+            id: "cli.onboarding-and-auth-setup",
+            taxonomySurfaceId: "cli",
+            taxonomyCategoryName: "Onboarding",
+            inventoryStatus: "complete",
+            profiles: ["all"],
+            features,
+            coverageIds,
+            inventoriedCoverageIds: coverageIds,
+            inventoryRefs: [],
+            scenarioRefs: [],
+            missingCoverageIds: [],
+            missingInventoryRefs: [],
+          },
+        ],
+      });
+      expect(scorecard.coverageIds).toEqual({
+        total: 4,
+        fulfilled: 1,
+        missing: 3,
+        fulfillmentPercent: 25,
+      });
+      const producer = result.results[0]?.producerEvidence;
+      expect(producer?.entries.map((entry) => entry.coverage)).toEqual(
+        coverageIds.map((id) => [{ id, role: "primary" }]),
+      );
+      for (const [index, original] of (producer?.entries ?? []).entries()) {
+        const imported = result.evidence.entries[index];
+        expect(imported?.test).toEqual(original.test);
+        expect(imported?.result).toEqual(original.result);
+        expect(imported?.coverage).toEqual(original.coverage);
+        expect(imported?.execution).toEqual(
+          evidenceMode === "slim" ? undefined : original.execution,
+        );
+      }
+      for (const index of [0, 2, 3]) {
+        expect(result.evidence.entries[index]?.result.failure?.reason).toContain(
+          "missing executable assertion marker(s):",
+        );
+      }
+      const written = validateQaEvidenceSummaryJson(
+        JSON.parse(await fs.readFile(result.evidencePath, "utf8")),
+      );
+      expect(written.entries).toEqual(result.evidence.entries);
+      expect(written.evidenceMode).toBe(evidenceMode);
+      expect(written.profilePlan).toEqual(profilePlan);
+
       const renderArgs = [
         "--import",
         "tsx",
@@ -301,6 +312,38 @@ describe.skipIf(process.platform === "win32")("onboarding assertion attribution"
       );
       expect(markdown).toContain("25%");
       expect(markdown).toContain("1 passed, 4 failed");
+      expect(markdown).toContain("Current taxonomy evidence");
+
+      const historical = structuredClone(written);
+      if (!historical.profilePlan) throw new Error("expected captured profile plan");
+      delete historical.profilePlan.taxonomyIdentity;
+      const historicalDir = path.join(tempRoot, "historical");
+      const historicalOutput = path.join(tempRoot, "historical-rendered");
+      await fs.mkdir(historicalDir);
+      await fs.writeFile(path.join(historicalDir, "qa-evidence.json"), JSON.stringify(historical));
+      const historicalRender = spawnSync(
+        process.execPath,
+        [
+          ...renderArgs.map((arg, index) =>
+            renderArgs[index - 1] === "--evidence-dir"
+              ? historicalDir
+              : renderArgs[index - 1] === "--output-dir"
+                ? historicalOutput
+                : arg,
+          ),
+          "--allow-failures",
+        ],
+        { cwd: repoRoot, encoding: "utf8" },
+      );
+      expect(historicalRender.status, historicalRender.stderr).toBe(0);
+      const historicalMarkdown = await fs.readFile(
+        path.join(historicalOutput, "maturity/scorecard.md"),
+        "utf8",
+      );
+      expect(historicalMarkdown).toContain("Coverage Unscored");
+      expect(historicalMarkdown).toContain("Historical evidence: taxonomy identity unknown");
+      expect(historicalMarkdown).toContain("1 passed, 4 failed");
+      expect(historicalMarkdown).not.toContain("Current taxonomy evidence");
     },
     60_000,
   );

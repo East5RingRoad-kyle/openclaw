@@ -2,6 +2,7 @@
 import { lstat, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
 import { defaultQaSuiteConcurrencyForTransport } from "./qa-transport-registry.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
@@ -212,6 +213,69 @@ describe("qa suite planning helpers", () => {
     ]);
   });
 
+  it.each([new Error("publication failed"), undefined])(
+    "drains started workers before propagating the first rejection (%s)",
+    async (failure) => {
+      const sibling = createDeferred<void>();
+      const bothStarted = createDeferred<void>();
+      const started: number[] = [];
+      let settled = false;
+      const run = mapQaSuiteWithConcurrency([1, 2, 3], 2, async (item) => {
+        started.push(item);
+        if (item === 1) {
+          await bothStarted.promise;
+          return await Promise.reject(failure);
+        }
+        bothStarted.resolve();
+        await sibling.promise;
+        throw new Error("later sibling failure");
+      }).then(
+        () => {
+          settled = true;
+          return { rejected: false, error: undefined };
+        },
+        (error: unknown) => {
+          settled = true;
+          return { rejected: true, error };
+        },
+      );
+      await bothStarted.promise;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(started).toEqual([1, 2]);
+      expect(settled).toBe(false);
+      sibling.resolve();
+      expect(await run).toEqual({ rejected: true, error: failure });
+      expect(started).toEqual([1, 2]);
+    },
+  );
+
+  it("drains the stagger gate without admitting waiting workers after a rejection", async () => {
+    const stagger = createDeferred<void>();
+    const started = createDeferred<void>();
+    const failure = new Error("first worker failed");
+    const mapper = vi.fn(async () => {
+      started.resolve();
+      throw failure;
+    });
+    const sleepImpl = vi.fn(() => stagger.promise);
+    let settled = false;
+    const run = mapQaSuiteWithConcurrency([1, 2, 3], 3, mapper, {
+      startStaggerMs: 25,
+      sleepImpl,
+    }).catch((error: unknown) => {
+      settled = true;
+      return error;
+    });
+    await started.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    expect(mapper).toHaveBeenCalledOnce();
+    stagger.resolve();
+    expect(await run).toBe(failure);
+    expect(mapper).toHaveBeenCalledOnce();
+    expect(sleepImpl).toHaveBeenCalledExactlyOnceWith(25);
+  });
+
   it("staggers scenario starts without reducing mapped concurrency", async () => {
     const sleeps: number[] = [];
     const releaseSleeps: Array<() => void> = [];
@@ -327,6 +391,21 @@ describe("qa suite planning helpers", () => {
     ).toThrow(
       "selected QA scenario(s) do not match the current QA lane: claude-subscription (authMode=subscription)",
     );
+  });
+
+  it("preserves ordered independent flow instances for repeated requested IDs", () => {
+    const scenarios = [makeQaSuiteTestScenario("first"), makeQaSuiteTestScenario("second")];
+    const selected = selectQaFlowSuiteScenarios({
+      scenarios,
+      scenarioIds: ["first", "second", "first"],
+      providerMode: "mock-openai",
+      primaryModel: "mock-openai/test-model",
+    });
+    expect(selected.map((scenario) => scenario.id)).toEqual(["first", "second", "first"]);
+    expect(new Set(selected).size).toBe(3);
+    expect(selected[0]).toEqual(scenarios[0]);
+    expect(selected[0]).not.toBe(scenarios[0]);
+    expect(selected[2]).not.toBe(selected[0]);
   });
 
   it("keeps an explicitly requested scenario when every lane contract matches", () => {

@@ -1,13 +1,21 @@
 // QA Lab tests cover canonical profile scheduling evidence.
 import path from "node:path";
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { createQaEvidenceInvocation } from "./evidence-invocation.js";
+import type {
+  QaEvidenceIdentity,
+  QaEvidenceStatus,
+  QaEvidenceSummaryV3Json,
+} from "./evidence-summary.js";
 import { qaProfileEvidencePlan } from "./profile-evidence-plan.js";
 import { readQaScenarioById } from "./scenario-catalog.js";
 import { expandQaScenarioExecutionCells, type QaScenarioExecutionCell } from "./scenario-lane.js";
 import {
   qaMaturityTaxonomyIdentity,
   readQaMaturityTaxonomySource,
+  qaProofRequirementsSchema,
   type QaMaturityTaxonomyIdentity,
+  type QaProofRequirements,
 } from "./scorecard-taxonomy.js";
 
 describe("QA profile evidence plan", () => {
@@ -33,6 +41,262 @@ describe("QA profile evidence plan", () => {
       observedCells,
     });
   }
+
+  const proofIdentity: QaEvidenceIdentity = {
+    source: { ref: "fixture-source", integrity: "sha256:fixture-source" },
+    runtime: { id: "openclaw", version: "1.2.3" },
+    package: {
+      kind: "npm-tarball",
+      spec: "openclaw",
+      version: "1.2.3",
+      integrity: "sha256:fixture-package",
+    },
+    protocol: "gateway:3",
+    accountRef: "fixture-account",
+    proofClass: "real-plugin/local-protocol",
+  };
+  const requirements: QaProofRequirements = [
+    {
+      id: "channel-proof",
+      coverageId: "channels.dm",
+      obligation: "required",
+      owner: "fixture-owner",
+      acceptedRef: "qa/fixtures/acceptance",
+      retryAcceptance: "selected-attempt",
+      alternatives: [
+        {
+          sourceRef: "fixture-source",
+          sourceIntegrity: "sha256:fixture-source",
+          runtime: "openclaw",
+          runtimeVersion: "1.2.3",
+          packageIntegrity: "sha256:fixture-package",
+          protocol: "gateway:3",
+          accountRef: "fixture-account",
+          proofClass: "real-plugin/local-protocol",
+        },
+      ],
+    },
+  ];
+  function proofPlan() {
+    return {
+      ...buildPlan([
+        { scenarioId: native.id, executionKind: "playwright", channel: null },
+        { scenarioId: portable.id, executionKind: "flow", channel: "matrix" },
+        { scenarioId: portable.id, executionKind: "flow", channel: "slack" },
+      ]),
+      proofRequirements: structuredClone(requirements),
+    };
+  }
+  function proofInvocation() {
+    const owner = createQaEvidenceInvocation({
+      scenarios: [
+        {
+          ...portable,
+          assertions: [
+            {
+              id: "assertion-one",
+              meaning: "the declared local protocol result",
+              coverage: [{ id: "channels.dm", role: "primary" }],
+            },
+          ],
+        },
+      ],
+      channel: "slack",
+      launch: proofIdentity,
+    });
+    function complete(
+      id: string,
+      rows: Array<{ status: QaEvidenceStatus; identity?: QaEvidenceIdentity }>,
+      status: QaEvidenceStatus = rows.some((row) => row.status === "fail") ? "fail" : "pass",
+    ) {
+      owner.complete(id, {
+        status,
+        entries: rows.map((row, index) => ({
+          test: { kind: "flow", id: portable.id, title: "proof fixture" },
+          coverage: [{ id: "channels.dm", role: "primary" }],
+          result: { status: row.status },
+          binding: {
+            occurrenceId: id,
+            assertionId: "assertion-one",
+            receiptId: `receipt-${index}`,
+          },
+          effective: true,
+        })),
+        receipts: rows.map((row, index) => ({
+          id: `receipt-${index}`,
+          phase: "runtime",
+          identity: row.identity ?? proofIdentity,
+          artifact: {
+            kind: "fixture",
+            source: "qa-suite",
+            path: `artifacts/${id}-${index}.json`,
+            sha256: "a".repeat(64),
+          },
+        })),
+      });
+      owner.select(0, id);
+    }
+    return { owner, complete };
+  }
+  function proofEvidence(
+    rows: Array<{ status: QaEvidenceStatus; identity?: QaEvidenceIdentity }>,
+    mode: "full" | "slim" = "full",
+  ) {
+    const { owner, complete } = proofInvocation();
+    complete(owner.begin(0), rows);
+    return owner.snapshot({ generatedAt: "2026-09-13T00:00:00Z", evidenceMode: mode });
+  }
+
+  it.each(["full", "slim"] as const)(
+    "qualifies one assertion with its bound target receipt in %s evidence",
+    (mode) => {
+      const evidence = proofEvidence([{ status: "pass" }], mode);
+      const original = structuredClone(evidence);
+      const plan = proofPlan();
+      const result = qaProfileEvidencePlan.attest(plan, true, evidence);
+      expect(result.proof).toEqual([
+        expect.objectContaining({
+          id: "channel-proof",
+          qualified: true,
+          checks: [expect.objectContaining({ assertionId: "assertion-one", status: "qualified" })],
+        }),
+      ]);
+      expect(result.sha256).toBe(qaProfileEvidencePlan.attest(plan).sha256);
+      expect(evidence).toEqual(original);
+    },
+  );
+
+  it.each([
+    { field: "source", expected: "stale" },
+    { field: "package", expected: "stale" },
+    { field: "runtime", expected: "stale" },
+    { field: "account", expected: "stale" },
+    { field: "unknown", expected: "insufficient" },
+    { field: "class", expected: "insufficient" },
+    { field: "prepared", expected: "insufficient" },
+  ])("classifies $field identity without inventing a product failure", ({ field, expected }) => {
+    const identity = structuredClone(proofIdentity);
+    if (field === "source") identity.source.ref = "different-source";
+    if (field === "package") identity.package!.integrity = "different-package";
+    if (field === "runtime") identity.runtime.version = "different-version";
+    if (field === "account") identity.accountRef = "different-account";
+    if (field === "unknown") identity.runtime.version = null;
+    if (field === "class") identity.proofClass = "fixture-only";
+    const evidence = proofEvidence([{ status: "pass", identity }]);
+    if (field === "prepared") evidence.occurrences[1]!.receipts[0]!.phase = "prepared";
+    const [result] = qaProfileEvidencePlan.evaluateProof(proofPlan(), evidence);
+    expect(result?.qualified).toBe(false);
+    expect(result?.checks.map((check) => check.status)).toEqual([expected]);
+    expect(evidence.entries[0]?.result.status).toBe("pass");
+  });
+
+  it.each([
+    { statuses: ["pass", "fail"], expected: "conflict" },
+    { statuses: ["fail"], expected: "failed" },
+    { statuses: ["blocked"], expected: "partial" },
+    { statuses: ["skipped"], expected: "partial" },
+  ] as const)(
+    "retains $statuses while classifying a required assertion",
+    ({ statuses, expected }) => {
+      const evidence = proofEvidence(statuses.map((status) => ({ status })));
+      expect(qaProfileEvidencePlan.evaluateProof(proofPlan(), evidence)[0]?.checks[0]?.status).toBe(
+        expected,
+      );
+      expect(evidence.entries.map((entry) => entry.result.status)).toEqual(statuses);
+      expect(() => qaProfileEvidencePlan.attest(proofPlan(), true, evidence)).toThrow(
+        `channel-proof (${expected})`,
+      );
+    },
+  );
+
+  it("distinguishes a prerequisite incident from an omitted started assertion", () => {
+    const { owner, complete } = proofInvocation();
+    complete(owner.begin(0), [], "blocked");
+    const evidence = owner.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+    const plan = proofPlan();
+    expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks[0]?.status).toBe(
+      "incomplete",
+    );
+    const missingPlan = {
+      ...buildPlan([
+        { scenarioId: native.id, executionKind: "playwright", channel: null },
+        { scenarioId: portable.id, executionKind: "flow", channel: "matrix" },
+      ]),
+      proofRequirements: requirements,
+    };
+    expect(qaProfileEvidencePlan.evaluateProof(missingPlan, evidence)[0]?.checks[0]?.status).toBe(
+      "prerequisite",
+    );
+  });
+
+  it("honors the declared whole-attempt retry policy and keeps advisory failures diagnostic", () => {
+    const { owner, complete } = proofInvocation();
+    const first = owner.begin(0);
+    complete(first, [{ status: "fail" }]);
+    complete(owner.begin(0, first), [{ status: "pass" }]);
+    const evidence = owner.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+    const plan = proofPlan();
+    expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.qualified).toBe(true);
+    plan.proofRequirements[0]!.retryAcceptance = "all-recorded-attempts";
+    expect(
+      qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks.map((check) => check.status),
+    ).toEqual(["failed", "qualified"]);
+    expect(() => qaProfileEvidencePlan.attest(plan, true, evidence)).toThrow(
+      "unqualified declared proof",
+    );
+    plan.proofRequirements[0]!.obligation = "advisory";
+    expect(qaProfileEvidencePlan.attest(plan, true, evidence).proof?.[0]?.qualified).toBe(false);
+  });
+
+  it("does not pool source and package proof from unrelated observations", () => {
+    const { owner, complete } = proofInvocation();
+    complete(owner.begin(0, null), [
+      {
+        status: "pass",
+        identity: { ...proofIdentity, package: { ...proofIdentity.package!, integrity: "other" } },
+      },
+    ]);
+    complete(owner.begin(0, null), [
+      {
+        status: "pass",
+        identity: { ...proofIdentity, source: { ...proofIdentity.source, ref: "other" } },
+      },
+    ]);
+    const evidence = owner.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+    expect(qaProfileEvidencePlan.evaluateProof(proofPlan(), evidence)[0]?.qualified).toBe(false);
+    const plan = proofPlan();
+    plan.proofRequirements[0]!.alternatives = [{ protocol: "gateway:3" }];
+    // The first observation satisfies this explicitly sparse alternative; the
+    // second still contradicts its own captured launch source.
+    expect(
+      qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks.map((check) => check.status),
+    ).toEqual(["qualified", "stale"]);
+  });
+
+  it("keeps historical or stale semantic identity unqualified and leaves absent obligations alone", () => {
+    const plan = proofPlan();
+    const evidence = proofEvidence([{ status: "pass" }]);
+    const { occurrences: _occurrences, ...withoutOccurrences } = evidence;
+    const legacy = {
+      ...withoutOccurrences,
+      schemaVersion: 2 as const,
+      entries: evidence.entries.map(({ binding: _binding, effective: _effective, ...row }) => row),
+    };
+    expect(qaProfileEvidencePlan.evaluateProof(plan, legacy)[0]?.checks[0]?.status).toBe(
+      "insufficient",
+    );
+    const old = structuredClone(evidence) as QaEvidenceSummaryV3Json;
+    old.profilePlan = { ...plan, taxonomyIdentity: { version: 1, sha256: "0".repeat(64) } };
+    expect(qaProfileEvidencePlan.evaluateProof(plan, old)[0]?.checks[0]?.status).toBe("stale");
+    delete old.profilePlan.taxonomyIdentity;
+    expect(qaProfileEvidencePlan.evaluateProof(plan, old)[0]?.checks[0]?.status).toBe(
+      "insufficient",
+    );
+    const { proofRequirements: _requirements, ...withoutRequirements } = plan;
+    expect(qaProfileEvidencePlan.attest(withoutRequirements, true, old)).not.toHaveProperty(
+      "proof",
+    );
+  });
 
   it("records a deterministic membership partition and exact execution cells", () => {
     const plan = buildPlan([
@@ -148,5 +412,37 @@ describe("QA profile evidence plan", () => {
     expect(qaProfileEvidencePlan.attest(reordered, true)).toEqual(
       qaProfileEvidencePlan.attest(plan, true),
     );
+  });
+
+  it("attests only explicit owner-accepted proof requirements and preserves unknown absence", () => {
+    const plan = buildPlan([]);
+    const requirements = qaProofRequirementsSchema.parse([
+      {
+        id: "native-install",
+        coverageId: "channels.dm",
+        obligation: "advisory",
+        owner: "synthetic-owner",
+        acceptedRef: "qa/fixtures/acceptance",
+        alternatives: [
+          { proofClass: "packaged-install/upgrade", packageIntegrity: "sha512-candidate" },
+        ],
+        retryAcceptance: "all-recorded-attempts",
+      },
+    ]);
+    const captured = qaProfileEvidencePlan.attest({ ...plan, proofRequirements: requirements });
+    expect(captured.plan.proofRequirements).toEqual(requirements);
+    expect(captured.sha256).not.toBe(qaProfileEvidencePlan.attest(plan).sha256);
+    expect(plan).not.toHaveProperty("proofRequirements");
+    expect(() => qaProofRequirementsSchema.parse([{ ...requirements[0], owner: "" }])).toThrow();
+    expect(() =>
+      qaProofRequirementsSchema.parse([{ ...requirements[0], acceptedRef: undefined }]),
+    ).toThrow();
+    expect(() =>
+      qaProofRequirementsSchema.parse([{ ...requirements[0], retryAcceptance: undefined }]),
+    ).toThrow();
+    expect(() =>
+      qaProofRequirementsSchema.parse([{ ...requirements[0], alternatives: [{}] }]),
+    ).toThrow();
+    expect(() => qaProofRequirementsSchema.parse([requirements[0], requirements[0]])).toThrow();
   });
 });

@@ -7,7 +7,12 @@ import {
   resolveQaCrablineChannelDriverArtifactPaths,
   type QaSuiteChannelDriverSelection,
 } from "./crabline-artifacts.js";
-import { buildQaSuiteEvidenceSummary, QA_EVIDENCE_FILENAME } from "./evidence-summary.js";
+import {
+  buildQaSuiteEvidenceSummary,
+  QA_EVIDENCE_FILENAME,
+  validateQaEvidenceSummaryJson,
+  type QaEvidenceSummaryJson,
+} from "./evidence-summary.js";
 import type { QaProviderMode } from "./model-selection.js";
 import type { QaTransportDriver } from "./qa-transport-registry.js";
 import type { QaTransportAdapter } from "./qa-transport.js";
@@ -142,6 +147,7 @@ export async function writeQaSuiteArtifacts(params: {
   scenarios: QaSuiteScenarioResult[];
   scenarioDefinitions?: readonly QaSeedScenarioWithSource[];
   evidenceMode?: QaScorecardEvidenceMode;
+  recordedEvidence?: QaEvidenceSummaryJson;
   metrics?: QaSuiteSummaryJson["metrics"];
   transport: QaTransportAdapter;
   // Reuse the canonical QaProviderMode union instead of re-declaring it
@@ -206,26 +212,28 @@ export async function writeQaSuiteArtifacts(params: {
       createCrablineChannelReportNotes: crablineRuntime?.createOpenClawCrablineChannelReportNotes,
     }),
   });
-  const evidence =
-    params.scenarioDefinitions && params.scenarioDefinitions.length > 0
+  const artifactPaths = [
+    { kind: "summary", path: path.basename(summaryPath) },
+    { kind: "report", path: path.basename(reportPath) },
+    ...(effectiveChannelDriverSelection
+      ? [
+          {
+            kind: "channel-capability-matrix",
+            path: effectiveChannelDriverSelection.capabilityMatrixPath,
+          },
+          {
+            // Persisted presentation kind; this is not a runtime proof receipt.
+            kind: "channel-driver-smoke",
+            path: effectiveChannelDriverSelection.providerReadinessArtifactPath,
+          },
+        ]
+      : []),
+  ];
+  const evidence = params.recordedEvidence
+    ? validateQaEvidenceSummaryJson(params.recordedEvidence)
+    : params.scenarioDefinitions && params.scenarioDefinitions.length > 0
       ? buildQaSuiteEvidenceSummary({
-          artifactPaths: [
-            { kind: "summary", path: path.basename(summaryPath) },
-            { kind: "report", path: path.basename(reportPath) },
-            ...(effectiveChannelDriverSelection
-              ? [
-                  {
-                    kind: "channel-capability-matrix",
-                    path: effectiveChannelDriverSelection.capabilityMatrixPath,
-                  },
-                  {
-                    // Evidence schema v2 keeps this persisted kind until an explicit schema migration.
-                    kind: "channel-driver-smoke",
-                    path: effectiveChannelDriverSelection.providerReadinessArtifactPath,
-                  },
-                ]
-              : []),
-          ],
+          artifactPaths,
           evidenceMode: params.evidenceMode,
           channelId:
             params.channel ?? params.channelDriverSelection?.channel ?? params.transport.id,
@@ -239,6 +247,25 @@ export async function writeQaSuiteArtifacts(params: {
           scenarioResults: params.scenarios,
         })
       : undefined;
+  if (params.recordedEvidence && evidence) {
+    // Publication adds presentation links to the cloned rows, never to target
+    // receipts. Slim evidence keeps its intentionally absent execution fields.
+    for (const entry of evidence.entries) {
+      if (!entry.execution) continue;
+      for (const artifact of artifactPaths) {
+        if (
+          !entry.execution.artifacts.some(
+            (existing) =>
+              existing.kind === artifact.kind &&
+              existing.path === artifact.path &&
+              existing.source === "qa-suite",
+          )
+        ) {
+          entry.execution.artifacts.push({ ...artifact, source: "qa-suite" });
+        }
+      }
+    }
+  }
   const writeEvidenceFile = params.status !== "running" && (params.writeEvidenceFile ?? true);
   if (!writeEvidenceFile) {
     await fs.rm(evidencePath, { force: true });

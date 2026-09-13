@@ -1,10 +1,23 @@
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQaBusState } from "./bus-state.js";
+import {
+  projectQaEvidenceScenarioOutcomes,
+  type QaEvidenceSummaryV3Json,
+} from "./evidence-summary.js";
 import type { QaLabServerHandle } from "./lab-server.types.js";
+import { createQaSuiteEvidenceInvocation } from "./suite-evidence.js";
 import { runQaFlowSuiteFromRuntime } from "./suite-run.runtime.js";
 import { makeQaSuiteTestScenario } from "./suite-test-helpers.js";
 import type { QaSuiteResolvedRunContext, QaSuiteResult, QaSuiteRunParams } from "./suite-types.js";
+import { createTempDirHarness } from "./temp-dir.test-helper.js";
+
+const tempDirs = createTempDirHarness();
+let repoRoot: string;
+let outputDir: string;
 
 const mocks = vi.hoisted(() => ({
   readQaBootstrapScenarioCatalog: vi.fn(),
@@ -46,7 +59,9 @@ function createControlUiTestLab(): QaLabServerHandle {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  repoRoot = await tempDirs.makeTempDir("qa-parity-control-ui-");
+  outputDir = path.join(repoRoot, "output");
   vi.clearAllMocks();
   mocks.readQaBootstrapScenarioCatalog.mockReturnValue({
     scenarios: [
@@ -82,13 +97,17 @@ beforeEach(() => {
       },
     }),
   );
-  mocks.writeQaSuiteArtifacts.mockResolvedValue({
-    evidence: undefined,
+  mocks.writeQaSuiteArtifacts.mockImplementation(async (params) => ({
+    evidence: params.recordedEvidence,
     evidencePath: "/qa-output/qa-evidence.json",
     report: "",
     reportPath: "/qa-output/qa-suite-report.md",
     summaryPath: "/qa-output/qa-suite-summary.json",
-  });
+  }));
+});
+
+afterEach(async () => {
+  await tempDirs.cleanup();
 });
 
 describe("runtime parity Control UI ownership", () => {
@@ -127,8 +146,8 @@ describe("runtime parity Control UI ownership", () => {
     const lab = createControlUiTestLab();
 
     const result = await runQaFlowSuiteFromRuntime({
-      repoRoot: "/qa-repo",
-      outputDir: "/qa-output",
+      repoRoot,
+      outputDir,
       providerMode: "mock-openai",
       scenarioIds: [testCase.scenarioId],
       runtimePair: ["openclaw", "codex"],
@@ -154,8 +173,8 @@ describe("runtime parity Control UI ownership", () => {
     const mutateConfig = vi.fn((config: OpenClawConfig) => config);
 
     await runQaFlowSuiteFromRuntime({
-      repoRoot: "/qa-repo",
-      outputDir: "/qa-output",
+      repoRoot,
+      outputDir,
       providerMode: "mock-openai",
       scenarioIds: ["runtime-channel"],
       runtimePair: ["openclaw", "codex"],
@@ -180,8 +199,8 @@ describe("runtime parity Control UI ownership", () => {
     };
 
     await runQaFlowSuiteFromRuntime({
-      repoRoot: "/qa-repo",
-      outputDir: "/qa-output",
+      repoRoot,
+      outputDir,
       providerMode: "mock-openai",
       scenarioIds: ["runtime-channel"],
       runtimePair: ["openclaw", "codex"],
@@ -194,5 +213,92 @@ describe("runtime parity Control UI ownership", () => {
     for (const [params] of mocks.runQaFlowSuiteStandard.mock.calls) {
       expect(params.sutOpenClawCommand).toBe(sutOpenClawCommand);
     }
+  });
+
+  it("retains both real child observations and selects one zero-claim comparison", async () => {
+    const original = mocks.runQaFlowSuiteStandard.getMockImplementation()!;
+    mocks.runQaFlowSuiteStandard.mockImplementation(async (params, context) => {
+      const result = await original(params, context);
+      const recording = await createQaSuiteEvidenceInvocation(params, context);
+      const id = recording.invocation.begin(0);
+      result.scenarios[0] = await recording.record(0, id, result.scenarios[0]!);
+      result.evidence = recording.snapshot();
+      return result;
+    });
+    const lab = createControlUiTestLab();
+    const result = await runQaFlowSuiteFromRuntime({
+      repoRoot,
+      outputDir,
+      providerMode: "mock-openai",
+      scenarioIds: ["runtime-channel"],
+      runtimePair: ["openclaw", "codex"],
+      lab,
+      startLab: async () => lab,
+    });
+    const evidence = result.evidence as QaEvidenceSummaryV3Json;
+    expect(projectQaEvidenceScenarioOutcomes(evidence)).toEqual([
+      {
+        scenarioId: "runtime-channel",
+        scenarioInstanceId: evidence.occurrences[0]!.id,
+        occurrenceId: result.scenarios[0]!.evidenceOccurrenceId,
+        status: "pass",
+      },
+    ]);
+    expect(evidence.entries).toHaveLength(3);
+    expect(evidence.entries.at(-1)?.coverage).toEqual([]);
+    expect(evidence.entries.every((entry) => entry.effective)).toBe(true);
+    const childPaths = mocks.runQaFlowSuiteStandard.mock.calls.map(([params]) => params.outputDir);
+    expect(new Set(childPaths).size).toBe(2);
+    for (const occurrence of evidence.occurrences) {
+      for (const receipt of occurrence.receipts) {
+        expect(receipt.phase).toBe("prepared");
+        expect(receipt.identity.package).toBeNull();
+        expect(receipt.identity.protocol).toBeNull();
+        expect(receipt.identity.accountRef).toBeNull();
+        expect(receipt.identity.proofClass).toBeNull();
+        const bytes = await fs.readFile(path.resolve(outputDir, receipt.artifact.path));
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(receipt.artifact.sha256);
+      }
+    }
+  });
+
+  it("retains a completed child before a later child throws and records the parent failure", async () => {
+    const original = mocks.runQaFlowSuiteStandard.getMockImplementation()!;
+    const failure = new Error("runtime cell failed before its result");
+    let calls = 0;
+    mocks.runQaFlowSuiteStandard.mockImplementation(async (params, context) => {
+      const recording = await createQaSuiteEvidenceInvocation(params, context);
+      if (++calls === 2) throw failure;
+      const result = await original(params, context);
+      result.scenarios[0] = await recording.record(
+        0,
+        recording.invocation.begin(0),
+        result.scenarios[0]!,
+      );
+      result.evidence = recording.snapshot();
+      return result;
+    });
+    let evidence: QaEvidenceSummaryV3Json | undefined;
+    const lab = createControlUiTestLab();
+    await expect(
+      runQaFlowSuiteFromRuntime({
+        repoRoot,
+        outputDir,
+        providerMode: "mock-openai",
+        scenarioIds: ["runtime-channel"],
+        runtimePair: ["openclaw", "codex"],
+        lab,
+        startLab: async () => lab,
+        onEvidence: (summary) => {
+          evidence = structuredClone(summary);
+        },
+      }),
+    ).rejects.toBe(failure);
+    expect(evidence?.entries.map((entry) => entry.result.status)).toEqual(["pass", "fail"]);
+    expect(evidence?.entries.at(-1)?.coverage).toEqual([]);
+    expect(projectQaEvidenceScenarioOutcomes(evidence!)).toEqual([
+      expect.objectContaining({ scenarioId: "runtime-channel", status: "fail" }),
+    ]);
+    expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();
   });
 });

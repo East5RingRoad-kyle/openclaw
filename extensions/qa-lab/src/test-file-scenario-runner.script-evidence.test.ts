@@ -2,7 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { validateQaEvidenceSummaryJson } from "./evidence-summary.js";
+import {
+  projectQaEvidenceScenarioOutcomes,
+  validateQaEvidenceSummaryJson,
+} from "./evidence-summary.js";
 import type { QaSeedScenarioWithSource } from "./scenario-catalog.js";
 import {
   runQaTestFileScenarios,
@@ -14,6 +17,7 @@ import {
   createScenarioRunnerTestHarness,
   makeTestFileScenario,
   writeScriptProducerEvidence,
+  resolveScriptAttemptOutputDir,
 } from "./test-file-scenario-runner.test-support.js";
 
 const harness = createScenarioRunnerTestHarness();
@@ -24,6 +28,54 @@ afterEach(async () => {
 });
 
 describe("qa test file scenario runner", () => {
+  it.each(["blocked", "skipped"] as const)(
+    "preserves the selected original failure when a continued producer is %s",
+    async (status) => {
+      const repoRoot = await makeTempRepo("qa-script-continued-");
+      const outputDir = path.join(repoRoot, "evidence");
+      const scenarios = [makeTestFileScenario("script", "scripts/evidence-producer.ts")];
+      const run = (
+        next: "fail" | "blocked" | "skipped",
+        continuation?: ReturnType<typeof validateQaEvidenceSummaryJson>,
+      ) =>
+        runQaTestFileScenarios({
+          repoRoot,
+          outputDir,
+          scenarios,
+          ...QA_TEST_RUNNER_DEFAULTS,
+          ...(continuation?.schemaVersion === 3
+            ? {
+                evidenceAnchors: continuation.occurrences.filter(
+                  (item) => item.scenario?.kind === "instance",
+                ),
+                evidenceContinuation: continuation,
+              }
+            : {}),
+          runCommand: async (command) => {
+            await writeScriptProducerEvidence({
+              outputDir: resolveScriptAttemptOutputDir(command),
+              status: next,
+              failureReason: next === "fail" ? "original failure" : "later nonpass",
+            });
+            return { exitCode: 0, stdout: next, stderr: "" };
+          },
+        });
+      const first = await run("fail");
+      const later = await run(status, first.evidence);
+      expect(later.results[0]).toMatchObject({
+        status: "fail",
+        failureMessage: "original failure",
+        evidenceOccurrenceId: first.results[0]!.evidenceOccurrenceId,
+        logPath: first.results[0]!.logPath,
+      });
+      expect(projectQaEvidenceScenarioOutcomes(later.evidence)[0]).toMatchObject({
+        status: "fail",
+        occurrenceId: first.results[0]!.evidenceOccurrenceId,
+      });
+      expect(later.evidence.entries.map((row) => row.result.status)).toEqual(["fail", status]);
+    },
+  );
+
   it.each(
     (
       [
@@ -73,6 +125,10 @@ describe("qa test file scenario runner", () => {
           },
         ],
         runCommand: async (command) => {
+          const outputDir = resolveScriptAttemptOutputDir(command);
+          const scenarioOutputDir = path.join(outputDir, "scenario-script");
+          const latestRunPath = path.join(scenarioOutputDir, "latest-run.json");
+          const evidencePath = path.join(scenarioOutputDir, "qa-evidence.json");
           if (command.args.includes("scripts/healthy-evidence-producer.ts")) {
             await writeScriptProducerEvidence({
               outputDir,
@@ -144,6 +200,12 @@ describe("qa test file scenario runner", () => {
       if (evidenceMode === "slim") {
         expect(exportedEvidence.entries.every((entry) => entry.execution === undefined)).toBe(true);
       }
+      if (evidence === "stale") {
+        expect(JSON.parse(await fs.readFile(evidencePath, "utf8")).entries[0].result.status).toBe(
+          "pass",
+        );
+        await fs.access(latestRunPath);
+      }
     },
   );
 
@@ -157,6 +219,7 @@ describe("qa test file scenario runner", () => {
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
       runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         commands.push(command);
         const runRoot = path.join(outputDir, "scenario-script", "run-1");
         await fs.mkdir(path.join(runRoot, "surfaces", "web-ui"), { recursive: true });
@@ -185,7 +248,7 @@ describe("qa test file scenario runner", () => {
         "scripts/evidence-producer.ts",
         "--once",
         "--artifact-base",
-        path.join(outputDir, "scenario-script"),
+        path.join(path.dirname(result.results[0]!.logPath), "scenario-script"),
       ],
     ]);
     expect(commands.map((command) => command.timeoutMs)).toEqual([30 * 60_000]);
@@ -201,7 +264,13 @@ describe("qa test file scenario runner", () => {
         artifacts: [
           {
             kind: "screenshot",
-            path: ".artifacts/qa-e2e/scenario-script/scenario-script/run-1/surfaces/web-ui/screenshot.png",
+            path: path.relative(
+              repoRoot,
+              path.join(
+                path.dirname(result.results[0]!.logPath),
+                "scenario-script/run-1/surfaces/web-ui/screenshot.png",
+              ),
+            ),
             source: "script-producer:web-ui:smoke",
           },
         ],
@@ -226,6 +295,7 @@ describe("qa test file scenario runner", () => {
       scenarios: [scenario],
       commandTimeoutMs: 30 * 60_000,
       runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         commands.push(command);
         await writeScriptProducerEvidence({
           outputDir,
@@ -253,7 +323,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           failureReason: "Script producer check failed.",
           outputDir,
@@ -300,7 +371,7 @@ describe("qa test file scenario runner", () => {
       },
     });
   });
-  it("suppresses a failed-script fallback row already owned by producer scenario evidence", async () => {
+  it("keeps producer and command failures as distinct observations despite a shared id", async () => {
     const repoRoot = await makeTempRepo("qa-script-duplicate-scenario-evidence-");
     const outputDir = path.join(repoRoot, ".artifacts", "qa-e2e", "scenario-script-duplicate");
     const result = await runQaTestFileScenarios({
@@ -308,7 +379,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           outputDir,
           producerId: "scenario-script",
@@ -321,11 +393,22 @@ describe("qa test file scenario runner", () => {
     });
 
     expect(result.results[0]).toMatchObject({ status: "fail" });
-    expect(result.evidence.entries).toHaveLength(1);
+    expect(result.evidence.entries).toHaveLength(2);
     expect(result.evidence.entries[0]).toMatchObject({
       test: { id: "scenario-script" },
       result: { failure: { reason: "producer recorded the script failure" }, status: "fail" },
     });
+    expect(result.evidence.entries[1]).toMatchObject({
+      test: { id: "scenario-script" },
+      coverage: [],
+      result: { status: "fail", failure: { reason: "node exited with 1" } },
+    });
+    expect(result.evidence.schemaVersion).toBe(3);
+    if (result.evidence.schemaVersion === 3) {
+      expect(result.evidence.entries[0]!.binding.occurrenceId).not.toBe(
+        result.evidence.entries[1]!.binding.occurrenceId,
+      );
+    }
   });
 
   it.each([
@@ -333,7 +416,7 @@ describe("qa test file scenario runner", () => {
     { producerStatus: "blocked" as const, terminal: "timeout" as const },
     { producerStatus: "skipped" as const, terminal: "exit" as const },
   ])(
-    "makes a $terminal failure override colliding $producerStatus producer evidence",
+    "retains a $terminal failure beside colliding $producerStatus producer evidence",
     async ({ producerStatus, terminal }) => {
       const commandName = path.basename(process.execPath);
       const tempRoot = await makeTempRepo(`qa-script-terminal-${terminal}-${producerStatus}-`);
@@ -355,6 +438,7 @@ describe("qa test file scenario runner", () => {
         scenarios: [makeTestFileScenario("script", scriptPath)],
         commandTimeoutMs: 1_000,
         runCommand: async (command) => {
+          const outputDir = resolveScriptAttemptOutputDir(command);
           const artifactBase = path.join(outputDir, "scenario-script");
           expect(command.args).toEqual([
             "--import",
@@ -399,7 +483,7 @@ describe("qa test file scenario runner", () => {
             : `${commandName} exited with 7`,
         status: "fail",
       });
-      expect(result.evidence.entries).toHaveLength(2);
+      expect(result.evidence.entries).toHaveLength(3);
       expect(
         result.evidence.entries.find((entry) => entry.test.id === "scenario-script"),
       ).toMatchObject({
@@ -408,6 +492,14 @@ describe("qa test file scenario runner", () => {
           artifacts: [{ kind: "log", path: expect.stringContaining("producer.log") }],
           runner: "evidence-producer-script",
         },
+        result: { status: producerStatus },
+      });
+      expect(
+        result.evidence.entries.find((entry) => entry.test.id === "producer-diagnostic"),
+      ).toMatchObject({ result: { status: "pass" } });
+      expect(result.evidence.entries[2]).toMatchObject({
+        test: { id: "scenario-script", kind: "script-test" },
+        coverage: [],
         result: {
           failure: {
             reason: `${commandName} ${
@@ -417,9 +509,6 @@ describe("qa test file scenario runner", () => {
           status: "fail",
         },
       });
-      expect(
-        result.evidence.entries.find((entry) => entry.test.id === "producer-diagnostic"),
-      ).toMatchObject({ result: { status: "pass" } });
     },
   );
 
@@ -431,7 +520,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           failureReason: "Script producer check failed.",
           outputDir,
@@ -468,7 +558,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           outputDir,
           status: "blocked",
@@ -510,7 +601,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [scenario],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           outputDir,
           status: "blocked",
@@ -564,7 +656,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [scenario],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           additionalEntries: buildScriptProducerEvidence({
             producerId: "script-producer.web-ui.executed",
@@ -634,7 +727,8 @@ describe("qa test file scenario runner", () => {
         outputDir,
         ...QA_TEST_RUNNER_DEFAULTS,
         scenarios: [scenario],
-        runCommand: async () => {
+        runCommand: async (command) => {
+          const outputDir = resolveScriptAttemptOutputDir(command);
           await writeScriptProducerEvidence({
             additionalEntries: additionalStatuses.flatMap(
               (status, index) =>
@@ -665,7 +759,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           evidenceLocation: "scenario-root",
           latestRun: "none",
@@ -692,7 +787,8 @@ describe("qa test file scenario runner", () => {
       outputDir,
       ...QA_TEST_RUNNER_DEFAULTS,
       scenarios: [makeTestFileScenario("script", "scripts/evidence-producer.ts")],
-      runCommand: async () => {
+      runCommand: async (command) => {
+        const outputDir = resolveScriptAttemptOutputDir(command);
         await writeScriptProducerEvidence({
           artifacts: [{ kind: "screenshot", path: externalArtifact }],
           outputDir,
@@ -770,7 +866,12 @@ describe("qa test file scenario runner", () => {
         artifacts: [
           {
             kind: "log",
-            path: path.join(outputDir, "scenario-script", "run-1", "artifact.log"),
+            path: path.join(
+              path.dirname(result.results[0]!.logPath),
+              "scenario-script",
+              "run-1",
+              "artifact.log",
+            ),
           },
         ],
       },

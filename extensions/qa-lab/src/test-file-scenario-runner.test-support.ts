@@ -86,6 +86,15 @@ export async function writeDockerCandidateManifest(
   return { exitCode: 0, stdout: "", stderr: "" };
 }
 
+export function resolveScriptAttemptOutputDir(command: QaScenarioCommandExecution) {
+  const index = command.args.indexOf("--artifact-base");
+  const artifactBase = command.args[index + 1];
+  if (index < 0 || !artifactBase) {
+    throw new Error("script fixture did not receive its owned artifact directory");
+  }
+  return path.dirname(artifactBase);
+}
+
 export async function writeNativeVitestReport(
   command: QaScenarioCommandExecution,
   counts: {

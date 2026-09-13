@@ -21,6 +21,7 @@ import type {
 } from "../shared/evidence-gallery-types.js";
 import { toRepoPath, toRepoRelativePath } from "./cli-paths.js";
 import {
+  getEffectiveQaEvidenceEntries,
   QA_EVIDENCE_FILENAME,
   validateQaEvidenceSummaryJson,
   type QaEvidenceStatus,
@@ -635,12 +636,15 @@ function uxMatrixEntryKey(
   return null;
 }
 
-function buildUxMatrixEvidenceEntryIndex(entries: readonly QaEvidenceSummaryEntry[]) {
-  const indexed = new Map<string, QaEvidenceSummaryEntry>();
-  for (const entry of entries) {
+function buildUxMatrixEvidenceEntryIndex(
+  entries: readonly QaEvidenceSummaryEntry[],
+  effectiveEntries: ReadonlySet<QaEvidenceSummaryEntry>,
+) {
+  const indexed = new Map<string, { entry: QaEvidenceSummaryEntry; key: string }>();
+  for (const [index, entry] of entries.entries()) {
     const key = uxMatrixEntryKey(entry);
-    if (key) {
-      indexed.set(`${key.surface}:${key.stage}`, entry);
+    if (key && effectiveEntries.has(entry)) {
+      indexed.set(`${key.surface}:${key.stage}`, { entry, key: String(index) });
     }
   }
   return indexed;
@@ -651,13 +655,17 @@ function readMatrixCells(params: {
   matrix: Record<string, unknown> | null;
   repoRoot: string;
   summaryEntries: readonly QaEvidenceSummaryEntry[];
+  effectiveEntries: ReadonlySet<QaEvidenceSummaryEntry>;
 }): QaEvidenceMatrixCellView[] {
   const rawCells = Array.isArray(params.matrix?.cells)
     ? params.matrix.cells
         .map(readRecord)
         .filter((cell): cell is Record<string, unknown> => Boolean(cell))
     : [];
-  const entriesByCell = buildUxMatrixEvidenceEntryIndex(params.summaryEntries);
+  const entriesByCell = buildUxMatrixEvidenceEntryIndex(
+    params.summaryEntries,
+    params.effectiveEntries,
+  );
   return rawCells.flatMap((cell): QaEvidenceMatrixCellView[] => {
     const rawSurface = readStringValue(cell.surface) ?? null;
     const rawStage = readStringValue(cell.stage) ?? null;
@@ -665,8 +673,9 @@ function readMatrixCells(params: {
     if (!rawSurface || !rawStage) {
       return [];
     }
-    const entry =
+    const selected =
       rawStatus === "proof-gap" ? null : (entriesByCell.get(`${rawSurface}:${rawStage}`) ?? null);
+    const entry = selected?.entry;
     const artifacts = entry?.execution?.artifacts ?? [];
     const runner = readRecord(cell.runner);
     const sanitizeCellString = (value: string) =>
@@ -705,6 +714,7 @@ function readMatrixCells(params: {
         stage: sanitizeCellString(rawStage),
         status: sanitizeCellString(rawStatus),
         surface: sanitizeCellString(rawSurface),
+        entryKey: selected?.key ?? null,
         testId: entry?.test.id ? sanitizeCellString(entry.test.id) : null,
         title: entry?.test.title ? sanitizeCellString(entry.test.title) : null,
       },
@@ -767,6 +777,7 @@ async function buildProducerContext(params: {
   hrefEvidencePath: string;
   repoRoot: string;
   summaryEntries: readonly QaEvidenceSummaryEntry[];
+  effectiveEntries: ReadonlySet<QaEvidenceSummaryEntry>;
 }): Promise<QaEvidenceProducerContext | null> {
   const rootPath = await findUxMatrixProducerRoot(params);
   if (!rootPath) {
@@ -813,6 +824,7 @@ async function buildProducerContext(params: {
     matrix,
     repoRoot,
     summaryEntries: params.summaryEntries,
+    effectiveEntries: params.effectiveEntries,
   });
   return {
     commands: producerFiles.commands,
@@ -880,6 +892,7 @@ export async function buildQaEvidenceGalleryModel(params: {
     blocked: 0,
     skipped: 0,
   };
+  const effectiveEntries = new Set(getEffectiveQaEvidenceEntries(summary));
   // Resolve the declared-artifact allowlist once; buildArtifactView then only checks membership
   // instead of re-reading the evidence file and re-collecting the allowlist per artifact.
   const evidenceDir = path.dirname(evidencePath);
@@ -910,8 +923,11 @@ export async function buildQaEvidenceGalleryModel(params: {
     throwOnError: true,
   });
   let artifactOffset = 0;
-  const entries = summary.entries.map((entry): QaEvidenceGalleryEntryView => {
-    counts[entry.result.status] += 1;
+  const entries = summary.entries.map((entry, entryIndex): QaEvidenceGalleryEntryView => {
+    const effective = effectiveEntries.has(entry);
+    if (effective) {
+      counts[entry.result.status] += 1;
+    }
     const artifactCount = entry.execution?.artifacts?.length ?? 0;
     const artifacts = artifactViews.slice(artifactOffset, artifactOffset + artifactCount);
     artifactOffset += artifactCount;
@@ -922,6 +938,8 @@ export async function buildQaEvidenceGalleryModel(params: {
       });
     return {
       artifacts,
+      key: String(entryIndex),
+      effective,
       coverage: entry.coverage.map((coverage) => ({
         id: sanitizeEntryText(coverage.id),
         role: sanitizeEntryText(coverage.role),
@@ -956,6 +974,7 @@ export async function buildQaEvidenceGalleryModel(params: {
       hrefEvidencePath,
       repoRoot,
       summaryEntries: summary.entries,
+      effectiveEntries,
     }),
     schemaVersion: summary.schemaVersion,
   };

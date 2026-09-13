@@ -6,6 +6,11 @@ import { Parser } from "htmlparser2";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
+  buildQaOccurrenceEvidenceSummary,
+  validateQaEvidenceSummaryJson,
+  type QaEvidenceOccurrence,
+} from "../../extensions/qa-lab/api.js";
+import {
   qaMaturityTaxonomyIdentity,
   qaProfileEvidencePlan,
   readQaMaturityTaxonomySource,
@@ -223,6 +228,78 @@ function expectedMaturityScorePercent(): number {
 }
 
 describe("maturity docs renderer CLI", () => {
+  it("renders the effective retry while retaining the original failed observation", () => {
+    const evidenceDir = tempDirs.make("openclaw-maturity-occurrences-");
+    const outputDir = tempDirs.make("openclaw-maturity-occurrence-docs-");
+    writeQaEvidence({
+      dir: evidenceDir,
+      entries: [{ id: "same-label", status: "pass" }],
+      scorecard: allProfileScorecardFixture(),
+    });
+    const evidencePath = path.join(evidenceDir, "qa-evidence.json");
+    const legacy = validateQaEvidenceSummaryJson(JSON.parse(fs.readFileSync(evidencePath, "utf8")));
+    const anchor: QaEvidenceOccurrence = {
+      id: "scheduled-instance",
+      parentCell: { scenarioId: "same-label", executionKind: "script", channel: null },
+      scenario: { kind: "instance", resultOccurrenceId: "retry" },
+      retryOf: null,
+      terminalStatus: null,
+      assertions: null,
+      launch: {
+        source: { ref: null, integrity: null },
+        runtime: { id: null, version: null },
+        package: null,
+        protocol: null,
+        accountRef: null,
+        proofClass: null,
+      },
+      receipts: [],
+    };
+    const first: QaEvidenceOccurrence = {
+      ...anchor,
+      id: "first",
+      scenario: { kind: "observation", instanceOccurrenceId: anchor.id },
+      terminalStatus: "fail",
+    };
+    const retry: QaEvidenceOccurrence = {
+      ...first,
+      id: "retry",
+      retryOf: first.id,
+      terminalStatus: "pass",
+    };
+    const entry = legacy.entries[0]!;
+    const evidence = buildQaOccurrenceEvidenceSummary({
+      generatedAt: legacy.generatedAt,
+      profile: legacy.profile,
+      profilePlan: legacy.profilePlan,
+      scorecard: legacy.scorecard,
+      occurrences: [anchor, first, retry],
+      entries: [
+        {
+          ...entry,
+          result: { status: "fail" },
+          effective: false,
+          binding: { occurrenceId: first.id, assertionId: null, receiptId: null },
+        },
+        {
+          ...entry,
+          effective: true,
+          binding: { occurrenceId: retry.id, assertionId: null, receiptId: null },
+        },
+      ],
+    });
+    const raw = JSON.stringify(evidence);
+    fs.writeFileSync(evidencePath, raw);
+    const rendered = runCli("--output-dir", outputDir, "--evidence-dir", evidenceDir);
+    expect(rendered.status, rendered.stderr).toBe(0);
+    const scorecard = fs.readFileSync(path.join(outputDir, "maturity/scorecard.md"), "utf8");
+    const evidenceCard = scorecard.match(
+      /<div className="maturity-evidence-card">[\s\S]*?<\/div>/,
+    )?.[0];
+    expect(evidenceCard).toContain("<span>1 checks - 1 passed</span>");
+    expect(evidenceCard).not.toContain("failed");
+    expect(fs.readFileSync(evidencePath, "utf8")).toBe(raw);
+  });
   it("rejects unresolved taxonomy routes and anchors while accepting published mirrors", () => {
     const fixtureDir = tempDirs.make("openclaw-maturity-docs-links-");
     const docsRoot = path.join(fixtureDir, "docs");

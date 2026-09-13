@@ -18,6 +18,7 @@ import {
   type QaSuiteGatewayRssSample,
   writeQaSuiteArtifacts,
 } from "./suite-artifacts.js";
+import { createQaSuiteEvidenceInvocation } from "./suite-evidence.js";
 import {
   applyQaSuiteGatewayConfigPatches,
   collectQaSuiteTransportPolicy,
@@ -75,6 +76,7 @@ export async function runQaFlowSuiteStandard(
     progressEnabled,
     gatewayHeapCheckpointsEnabled,
   } = context;
+  const recording = await createQaSuiteEvidenceInvocation(params, context);
   const ownsLab = !params?.lab;
   const startLab = params?.startLab;
   const controlUiEnabled =
@@ -253,15 +255,37 @@ export async function runQaFlowSuiteStandard(
       const scenarioBootstrapFinishedAt = new Date();
       let scenarioExecutionStartedAt = scenarioBootstrapFinishedAt;
       let scenarioExecutionFinishedAt = scenarioBootstrapFinishedAt;
+      let previousAttempt = recording.invocation.previousFailure(index);
       const runSelectedScenario = async () => {
         // Retry backoff and unsuccessful attempts are not part of the final
         // runtime turn, and they must not be relabeled as gateway bootstrap.
         scenarioExecutionStartedAt = new Date();
+        const id = recording.invocation.begin(index, previousAttempt);
+        let result: QaSuiteScenarioResult;
         try {
-          return await runScenarioDefinition(activeEnv, scenario);
+          result = await runScenarioDefinition(activeEnv, scenario);
+        } catch (error) {
+          await recording.record(
+            index,
+            id,
+            {
+              name: scenario.title,
+              status: "fail",
+              details: String(error),
+              steps: [],
+            },
+            { diagnostic: true, env: activeEnv, selectedId: previousAttempt ?? id },
+          );
+          throw error;
         } finally {
           scenarioExecutionFinishedAt = new Date();
         }
+        const recorded = await recording.record(index, id, result, {
+          env: activeEnv,
+          selectedId: previousAttempt !== null && result.status !== "pass" ? previousAttempt : id,
+        });
+        previousAttempt = id;
+        return recorded;
       };
       const scenarioRetryCount =
         scenario.execution.kind === "flow" ? scenario.execution.retryCount : undefined;
@@ -278,10 +302,27 @@ export async function runQaFlowSuiteStandard(
               );
             });
       if (scenarioResult.status === "pass" && params?.roundTripProbe?.scenarioId === scenario.id) {
-        const probeResult = await runQaSuiteRoundTripProbe({
-          probe: params.roundTripProbe,
-          transport,
-        });
+        const probeOccurrenceId = recording.invocation.begin(index, null);
+        let probeResult: Awaited<ReturnType<typeof runQaSuiteRoundTripProbe>>;
+        try {
+          probeResult = await runQaSuiteRoundTripProbe({
+            probe: params.roundTripProbe,
+            transport,
+          });
+        } catch (error) {
+          await recording.record(
+            index,
+            probeOccurrenceId,
+            {
+              name: scenario.title,
+              status: "fail",
+              details: String(error),
+              steps: [],
+            },
+            { diagnostic: true, env: activeEnv },
+          );
+          throw error;
+        }
         const probePassed = probeResult.passed >= params.roundTripProbe.count;
         scenarioResult = {
           ...scenarioResult,
@@ -297,6 +338,10 @@ export async function runQaFlowSuiteStandard(
             },
           ],
         };
+        scenarioResult = await recording.record(index, probeOccurrenceId, scenarioResult, {
+          diagnostic: true,
+          env: activeEnv,
+        });
       }
       if (params?.captureRuntimeParityCell && selectedScenarios.length === 1) {
         runtimeParityCellTiming = measureRuntimeParityCellTiming({
@@ -367,6 +412,7 @@ export async function runQaFlowSuiteStandard(
           metrics,
           scenarioDefinitions: selectedScenarios,
           evidenceMode: params?.evidenceMode,
+          recordedEvidence: recording.snapshot(),
           transport,
           providerMode,
           primaryModel,
