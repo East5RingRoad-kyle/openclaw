@@ -58,7 +58,7 @@ struct AppStateIsolationTests {
             ] {
                 let threadButton = try await self.threadMenuButton(in: window)
                 var previousStates: [NSControl.StateValue] = []
-                try AppKitTestSupport.pressMenu(threadButton) { menu in
+                try await AppKitTestSupport.pressMenu(threadButton, in: window) { menu in
                     let index = try #require(menu.items.firstIndex { $0.title == title })
                     let other = try #require(menu.items.first { $0.title == otherTitle })
                     try #require(menu.items[index].isEnabled)
@@ -76,7 +76,7 @@ struct AppStateIsolationTests {
 
             let button = try await self.loadedModelMenuButton(in: window, selection: "profile")
             var initiallyPinned = false
-            try AppKitTestSupport.pressMenu(button) { menu in
+            try await AppKitTestSupport.pressMenu(button, in: window) { menu in
                 initiallyPinned = menu.items.contains { $0.title == "Unpin model" }
                 let index = try #require(menu.items.firstIndex { $0.title == "fixture/fresh" })
                 try #require(menu.items[index].isEnabled)
@@ -93,7 +93,7 @@ struct AppStateIsolationTests {
             #expect(await transport.selectedModels == ["fixture/fresh"])
             #expect(AppDefaults.standard.stringArray(forKey: recentsKey) == ["fixture/fresh"])
             #expect(defaultDefaults.stringArray(forKey: recentsKey) == ["fixture/default"])
-            try AppKitTestSupport.pressMenu(selectedButton) { menu in
+            try await AppKitTestSupport.pressMenu(selectedButton, in: window) { menu in
                 let index = try #require(menu.items.firstIndex { $0.title == "Pin model" })
                 try #require(menu.items[index].isEnabled)
                 menu.performActionForItem(at: index)
@@ -112,7 +112,7 @@ struct AppStateIsolationTests {
             let reopenedWindow = try #require(reopened._testWindow)
             let reopenedButton = try await self.loadedModelMenuButton(in: reopenedWindow, selection: "fresh")
             var restoredPin = false
-            try AppKitTestSupport.pressMenu(reopenedButton) { menu in
+            try await AppKitTestSupport.pressMenu(reopenedButton, in: reopenedWindow) { menu in
                 restoredPin = menu.items.contains { $0.title == "Unpin model" }
             }
             #expect(restoredPin)
@@ -139,7 +139,7 @@ struct AppStateIsolationTests {
     private func threadPreferenceStates(in window: NSWindow) async throws -> [NSControl.StateValue] {
         let button = try await self.threadMenuButton(in: window)
         var states: [NSControl.StateValue] = []
-        try AppKitTestSupport.pressMenu(button) { menu in
+        try await AppKitTestSupport.pressMenu(button, in: window) { menu in
             states = try ["Show Reasoning", "Show Tool Activity"].map { title in
                 let item = try #require(menu.items.first { $0.title == title })
                 return item.state
