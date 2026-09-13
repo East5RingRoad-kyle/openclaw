@@ -93,14 +93,6 @@ if (tool === 'sysctl') {
 if (tool === 'rg') console.log('apps/macos/Sources/Fixture.swift');
 if (tool === 'git' && args[0] === 'rev-parse' && args[1] === '--show-toplevel') console.log(${JSON.stringify(root)});
 if (tool === 'git' && args[0] === 'diff' && args.includes('--name-only')) console.log('apps/macos/Sources/Fixture.swift');
-if (tool === 'xcrun') {
-  assert.equal(args[0], '--find');
-  assert.equal(args.length, 2);
-  assert.ok(['lldb', 'xctest'].includes(args[1]));
-  console.log(path.join(${JSON.stringify(bin)}, args[1]));
-}
-if (tool === 'lldb') console.log('fake-lldb-backtrace');
-if (tool === 'xctest') throw new Error('The fixture XCTest path must only be a fake debugger argument');
 if (tool === 'swift' && args[0] === 'test') {
   if (env.OPENCLAW_STATE_DIR !== ${JSON.stringify(path.join(root, "ambient-state"))}) {
     fs.writeFileSync(path.join(env.OPENCLAW_STATE_DIR, 'child-owned'), 'fixture');
@@ -109,19 +101,7 @@ if (tool === 'swift' && args[0] === 'test') {
   else process.exit(env.OPENCLAW_PROFILE === 'default' ? ${defaultExitCode} : ${namedExitCode});
 }
 `;
-  for (const tool of [
-    "security",
-    "swift",
-    "pnpm",
-    "node",
-    "git",
-    "uname",
-    "sysctl",
-    "rg",
-    "xcrun",
-    "lldb",
-    "xctest",
-  ]) {
+  for (const tool of ["security", "swift", "pnpm", "node", "git", "uname", "sysctl", "rg"]) {
     if (tool === "node") {
       fs.symlinkSync(process.execPath, path.join(bin, tool));
     } else {
@@ -275,57 +255,6 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
       expect(fs.readFileSync(f.env.GITHUB_OUTPUT, "utf8")).toContain("debug-tests-built=true");
     },
   );
-
-  it("preserves a failed default test result after its owned backtrace diagnostic succeeds", () => {
-    const f = fixture(1);
-    const result = f.run(swiftStep);
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(1);
-    expect(result.stdout).toContain("fake-lldb-backtrace");
-    expect(result.stderr).toContain("backtrace diagnostic exited 0; preserving Swift test exit 1");
-    expect(result.stderr).toContain("[macos-native] FAILED (exit 1)");
-    const calls = f.calls();
-    const tests = calls.filter((call) => call.tool === "swift" && call.args[0] === "test");
-    expect(tests).toHaveLength(1);
-    const test = tests[0];
-    expect(test.env.OPENCLAW_PROFILE).toBe("default");
-    const resolution = calls.filter((call) => call.tool === "xcrun");
-    expect(resolution.map((call) => call.args)).toEqual([
-      ["--find", "lldb"],
-      ["--find", "xctest"],
-    ]);
-    const debuggers = calls.filter((call) => call.tool === "lldb");
-    expect(debuggers).toHaveLength(1);
-    const debuggerCall = debuggers[0];
-    expect(debuggerCall.args).toEqual([
-      "--batch",
-      "--no-lldbinit",
-      "-o",
-      "run",
-      "-o",
-      "thread backtrace all",
-      "-k",
-      "thread backtrace all",
-      "--",
-      path.join(f.root, "bin/xctest"),
-      "-XCTest",
-      "OpenClawIPCTests.QuickChatCatalogPresentationTests/testRenderedPickerUsesCatalogAvailabilityReasoningAndSpeed",
-      path.join(repo, "apps/macos/.build/debug/OpenClawPackageTests.xctest"),
-    ]);
-    for (const call of [...resolution, debuggerCall]) {
-      expect(call.env).toEqual(test.env);
-      expect(call.keychain).toEqual({ locked: false, autoLock: false });
-      expect(call.settings).toEqual(test.settings);
-      expect(call.cache).toBe("reusable build cache");
-      expect(call.present.HOME).toBe(true);
-      expect(call.present.OPENCLAW_STATE_DIR).toBe(true);
-    }
-    expect(calls.some((call) => call.tool === "xctest")).toBe(false);
-    expect(calls.at(-2).tool).toBe("lldb");
-    expect(calls.at(-1).args).toEqual(["delete-keychain", test.settings.default]);
-    expect(fs.existsSync(path.dirname(test.env.HOME))).toBe(false);
-    expect(fs.existsSync(f.env.HOME)).toBe(true);
-  });
 
   it("fails closed when logical CPU detection is invalid", () => {
     const f = fixture(0, false, 0, "", "not-a-count");

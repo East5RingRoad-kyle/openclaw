@@ -105,14 +105,8 @@ enum AppKitTestSupport {
             windowIdentifier: windowIdentifier,
             control: identity,
             deadline: tracking.expiresAt)
-        let action = Task.detached { AppKitTestAXMenu.perform(request) }
-        let result = await withTaskCancellationHandler {
-            let result = await action.value
-            if result.action != nil { await tracking.waitForCompletion() }
-            return result
-        } onCancel: {
-            action.cancel()
-        }
+        let result = AppKitTestAXMenu.perform(request)
+        if result.action != nil { await tracking.waitForCompletion() }
         let completed = tracking.observed && tracking.inspectionCompleted && !tracking.timedOut
         print("""
         Menu interaction at \(file):\(line)
@@ -138,22 +132,24 @@ enum AppKitTestSupport {
     }
 }
 
+// Same-process AX actions may invoke SwiftUI handlers synchronously.
+@MainActor
 private enum AppKitTestAXMenu {
-    struct Identity: Sendable {
+    struct Identity {
         let role: String
         let identifier: String?
         let label: String?
         let title: String?
     }
 
-    struct Request: Sendable {
+    struct Request {
         let processID: Int32
         let windowIdentifier: String
         let control: Identity
         let deadline: ContinuousClock.Instant
     }
 
-    struct Result: Sendable {
+    struct Result {
         var advertisedActions: [String] = []
         var action: String?
         var status: Int32?

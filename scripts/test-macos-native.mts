@@ -88,21 +88,12 @@ await runWithFailedTrailer("macos-native", async () => {
     for (const dir of [path.dirname(keychain), path.join(home, "Library/Preferences")]) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
-    const run = async (
-      bin: string,
-      commandArgs: string[],
-      timeoutMs?: number,
-      output?: Buffer[],
-    ) => {
+    const run = async (bin: string, commandArgs: string[], timeoutMs?: number) => {
       canRemove = false;
       const code = await runManagedCommand({
         bin,
         args: commandArgs,
         env: childEnv,
-        stdio: output ? ["inherit", "pipe", "inherit"] : "inherit",
-        onReady: output
-          ? (child) => child.stdout?.on("data", (chunk: Buffer) => output.push(chunk))
-          : undefined,
         requireProcessTreeExit: true,
         timeoutMs,
       });
@@ -126,49 +117,6 @@ await runWithFailedTrailer("macos-native", async () => {
         }
       }
       process.exitCode = await run("swift", ["test", ...args]);
-      // Temporary QuickChat crash probe; remove before landing the preference repair.
-      if (profileMode === "default" && process.exitCode === 1) {
-        console.error("[macos-native] Starting temporary QuickChat backtrace diagnostic");
-        try {
-          const xcodeTools = { lldb: "", xctest: "" };
-          for (const tool of ["lldb", "xctest"] as const) {
-            const output: Buffer[] = [];
-            const code = await run("xcrun", ["--find", tool], 30_000, output);
-            const resolved = Buffer.concat(output).toString("utf8").trim();
-            if (code !== 0 || !path.isAbsolute(resolved)) {
-              throw new Error(`Could not resolve selected Xcode ${tool} (exit ${code})`);
-            }
-            xcodeTools[tool] = resolved;
-          }
-          const diagnosticCode = await run(
-            xcodeTools.lldb,
-            [
-              "--batch",
-              "--no-lldbinit",
-              "-o",
-              "run",
-              "-o",
-              "thread backtrace all",
-              "-k",
-              "thread backtrace all",
-              "--",
-              xcodeTools.xctest,
-              "-XCTest",
-              "OpenClawIPCTests.QuickChatCatalogPresentationTests/testRenderedPickerUsesCatalogAvailabilityReasoningAndSpeed",
-              path.resolve("apps/macos/.build/debug/OpenClawPackageTests.xctest"),
-            ],
-            120_000,
-          );
-          console.error(
-            `[macos-native] QuickChat backtrace diagnostic exited ${diagnosticCode}; preserving Swift test exit 1`,
-          );
-        } catch (error) {
-          console.error(
-            "[macos-native] QuickChat backtrace diagnostic failed; preserving Swift test exit 1",
-            error,
-          );
-        }
-      }
     } finally {
       // A completed failed create may leave a database. Never delete it until every child closed.
       if (canRemove && fs.existsSync(keychain)) {
