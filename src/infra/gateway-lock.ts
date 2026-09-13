@@ -406,6 +406,7 @@ export async function acquireGatewayLock(
   const role = opts.role ?? "gateway";
   const ownerId = randomUUID();
   const paths = resolveGatewayLockPaths(env, opts.lockDir);
+  const databasePath = path.join(paths.stateDir, "state", "openclaw.sqlite");
   const now = opts.now ?? performance.now.bind(performance);
   const startedAt = now();
   const timeoutMs = resolveTimerTimeoutMs(
@@ -425,7 +426,7 @@ export async function acquireGatewayLock(
       sleep: opts.sleep,
       acquire: () =>
         acquireGatewayLifecycleCoordinator({
-          databasePath: path.join(paths.stateDir, "state", "openclaw.sqlite"),
+          databasePath,
           busyTimeoutMs: 0,
         }),
       shouldRetry: (error) => {
@@ -527,6 +528,46 @@ export async function acquireGatewayLock(
       stateDir: paths.stateDir,
       ownerId,
     });
+    if (role === "sqlite-maintenance") {
+      let storesDrained = false;
+      let inTreeReleaseAttempt: Promise<void> | undefined;
+      const releaseInTree = () => {
+        inTreeReleaseAttempt ??= (async () => {
+          if (!storesDrained) {
+            const [
+              { closeOpenClawAgentDatabasesAsync },
+              { closeOpenClawStateDatabaseByPathAsync },
+            ] = await Promise.all([
+              import("../state/openclaw-agent-db.js"),
+              import("../state/openclaw-state-db.js"),
+            ]);
+            // Agent lease release can reopen shared state; retire both before
+            // releasing the Gateway authority retained by maintenance workers.
+            await closeOpenClawAgentDatabasesAsync(paths.stateDir);
+            await closeOpenClawStateDatabaseByPathAsync(databasePath);
+            storesDrained = true;
+          }
+          await configLock.release();
+          await stateLock.release();
+        })().catch((error: unknown) => {
+          // Retry only this handle's unfinished cleanup while lifecycle custody
+          // remains held. Successful drainage must not touch later resources.
+          inTreeReleaseAttempt = undefined;
+          throw error;
+        });
+        return inTreeReleaseAttempt;
+      };
+      return {
+        ...configLock,
+        stateDir: paths.stateDir,
+        stateLockPath: stateLock.lockPath,
+        releaseInTree,
+        release: async () => {
+          await releaseInTree();
+          stateLifecycle.release();
+        },
+      };
+    }
     let inTreeReleased = false;
     const releaseInTree = async () => {
       if (inTreeReleased) {
