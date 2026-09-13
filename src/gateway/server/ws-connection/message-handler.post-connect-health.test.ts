@@ -39,7 +39,6 @@ import { getOperatorApprovalRuntimeToken } from "../../operator-approval-runtime
 import { GatewayConnectionWork } from "../../server-connection-work.js";
 import {
   HEALTH_REFRESH_INTERVAL_MS,
-  MAX_PAYLOAD_BYTES,
   MAX_PREAUTH_PAYLOAD_BYTES,
   MAX_QUEUED_GATEWAY_PREAUTH_FRAMES,
 } from "../../server-constants.js";
@@ -366,6 +365,7 @@ function attachGatewayHarness(options: {
   isClosed?: () => boolean;
   setCloseCause?: SetCloseCause;
   clearHandshakeTimer?: () => void;
+  handoffAuthenticatedReceive?: () => void;
 }) {
   const connectionWork = new GatewayConnectionWork();
   let closed = false;
@@ -414,6 +414,7 @@ function attachGatewayHarness(options: {
   };
   const advanceHandshakePhase = vi.fn();
   const clearHandshakeTimer = options.clearHandshakeTimer ?? vi.fn();
+  const handoffAuthenticatedReceive = options.handoffAuthenticatedReceive ?? vi.fn();
   const logWsControl = createLogger();
   const refreshConnectedUserProfile = vi.fn<
     NonNullable<GatewayRequestContext["refreshConnectedUserProfile"]>
@@ -444,7 +445,7 @@ function attachGatewayHarness(options: {
   });
   attachGatewayWsMessageHandler({
     socket,
-    prepareAuthenticatedReceive: () => ({ ok: true, value: vi.fn() }),
+    prepareAuthenticatedReceive: () => ({ ok: true, value: handoffAuthenticatedReceive }),
     connectionWork,
     bootId: "post-connect-health-test-boot",
     upgradeReq: {
@@ -518,6 +519,7 @@ function attachGatewayHarness(options: {
     advanceHandshakePhase,
     clearHandshakeTimer,
     finishSocketSend: (error?: Error) => finishSocketSend?.(error),
+    handoffAuthenticatedReceive,
     logWsControl,
     refreshConnectedUserProfile,
     refreshedProfileIds,
@@ -894,19 +896,19 @@ describe("attachGatewayWsMessageHandler post-connect health refresh", () => {
       connectNonce: "nonce-watchdog-client-ownership",
       clearHandshakeTimer,
     });
-    const receiver = Reflect.get(harness.socket as object, "_receiver") as object;
-    expect(Reflect.get(receiver, "_maxPayload")).toBe(MAX_PREAUTH_PAYLOAD_BYTES);
-
     harness.sendConnect("watchdog-connect", BACKEND_CONNECT_PARAMS);
 
     await waitForFast(() => {
       expect(harness.setClient).toHaveBeenCalledOnce();
       expect(clearHandshakeTimer).toHaveBeenCalledOnce();
+      expect(harness.handoffAuthenticatedReceive).toHaveBeenCalledOnce();
       expect(harness.socketSend).toHaveBeenCalledOnce();
     });
-    expect(Reflect.get(receiver, "_maxPayload")).toBe(MAX_PAYLOAD_BYTES);
     expect(harness.setClient.mock.invocationCallOrder[0]).toBeLessThan(
       clearHandshakeTimer.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(clearHandshakeTimer.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.handoffAuthenticatedReceive.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
   });
 

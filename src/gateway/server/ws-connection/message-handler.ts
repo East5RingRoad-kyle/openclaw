@@ -195,10 +195,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
     return true;
   };
 
-  const handleMessage = async (
-    data: GatewayConnectionFrame,
-    admission?: "continuation",
-  ) => {
+  const handleMessage = async (data: GatewayConnectionFrame, admission?: "continuation") => {
     if (isClosed()) {
       return;
     }
