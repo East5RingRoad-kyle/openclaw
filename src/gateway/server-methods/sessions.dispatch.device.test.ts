@@ -166,6 +166,7 @@ describe("sessions.dispatch device targets", () => {
       }),
       expect.any(Function),
       undefined,
+      undefined,
     );
     expect(respond).toHaveBeenCalledWith(
       true,
@@ -229,6 +230,7 @@ describe("sessions.dispatch device targets", () => {
       expect(dispatch).toHaveBeenCalledWith(
         expect.objectContaining({ profileId: "device:largest", deviceId: "largest" }),
         expect.any(Function),
+        undefined,
         undefined,
       );
       expect(respond).toHaveBeenCalledWith(
@@ -329,6 +331,7 @@ describe("sessions.dispatch device targets", () => {
         expect(dispatch).toHaveBeenCalledWith(
           expect.objectContaining({ profileId: "device:second", deviceId: "second" }),
           expect.any(Function),
+          undefined,
           undefined,
         );
         expect(respond).toHaveBeenCalledWith(
@@ -677,6 +680,7 @@ describe("sessions.dispatch device targets", () => {
           }),
           expect.any(Function),
           undefined,
+          undefined,
         );
       } else {
         expect(dispatch).not.toHaveBeenCalled();
@@ -718,6 +722,7 @@ describe("sessions.dispatch device targets", () => {
           },
         }),
         expect.any(Function),
+        undefined,
         undefined,
       );
       expect(respond).toHaveBeenCalledWith(

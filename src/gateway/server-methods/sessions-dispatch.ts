@@ -268,6 +268,7 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
     respond,
     context,
     client,
+    signal,
     sessionMutationAuthorization,
   }) => {
     if (
@@ -498,6 +499,7 @@ export const sessionDispatchHandlers: GatewayRequestHandlers = {
               sessionKey: target.canonicalKey,
             }),
           sessionMutationAuthorization?.assertCurrent,
+          signal,
         );
         respondWorkerPlacement({
           respond,
