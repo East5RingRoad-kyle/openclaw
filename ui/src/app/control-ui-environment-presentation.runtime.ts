@@ -2,6 +2,7 @@ import {
   CONTROL_UI_ENVIRONMENT_ATTRIBUTE,
   type ControlUiEnvironment,
 } from "../../../src/gateway/control-ui-bootstrap-contract.js";
+import { createControlUiFaviconComposer } from "./control-ui-favicon.ts";
 import { applyControlUiOperatorSeamColor } from "./control-ui-presentation.ts";
 
 export function applyControlUiPresentation(params: {
@@ -24,24 +25,7 @@ export function applyControlUiPresentation(params: {
     root.style.removeProperty("--control-ui-environment-color");
     root.style.removeProperty("--control-ui-environment-ink");
     document.querySelector(".control-ui-environment-stripe")?.remove();
-    for (const icon of document.querySelectorAll<HTMLLinkElement>(
-      'link[rel="icon"][data-openclaw-original-favicon]',
-    )) {
-      const original: [string | null, string | null] = JSON.parse(
-        icon.dataset.openclawOriginalFavicon!,
-      );
-      for (const [attribute, value] of [
-        ["href", original[0]],
-        ["type", original[1]],
-      ] as const) {
-        if (value === null) {
-          icon.removeAttribute(attribute);
-        } else {
-          icon.setAttribute(attribute, value);
-        }
-      }
-      delete icon.dataset.openclawOriginalFavicon;
-    }
+    syncControlUiFavicon();
     return;
   }
   root.setAttribute(CONTROL_UI_ENVIRONMENT_ATTRIBUTE, JSON.stringify(environment));
@@ -63,19 +47,102 @@ export function applyControlUiPresentation(params: {
     document.title = `${document.title} · ${environment.label}`;
   }
 
-  const color = getComputedStyle(root)
-    .getPropertyValue(`--control-ui-environment-${environment.color}`)
-    .trim();
-  if (!color) {
-    return;
+  syncControlUiFavicon();
+}
+
+export type ControlUiFaviconStatus = "attention" | "working" | "done" | "disconnected" | "idle";
+
+let faviconStatus: ControlUiFaviconStatus = "idle";
+let composeFavicon: ReturnType<typeof createControlUiFaviconComposer> | undefined;
+const faviconRequests = new WeakMap<HTMLLinkElement, { signature: string }>();
+const statusTokens = {
+  attention: "--warn",
+  working: "--accent",
+  done: "--ok",
+  disconnected: "--muted",
+} as const;
+
+export function applyControlUiFaviconStatus(status: ControlUiFaviconStatus): void {
+  faviconStatus = status;
+  syncControlUiFavicon();
+}
+
+function restoreFavicon(icon: HTMLLinkElement, original: [string | null, string | null]) {
+  for (const [attribute, value] of [
+    ["href", original[0]],
+    ["type", original[1]],
+  ] as const) {
+    if (value === null) {
+      icon.removeAttribute(attribute);
+    } else {
+      icon.setAttribute(attribute, value);
+    }
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><path fill="${color}" d="M60 10C30 10 15 35 15 55c0 20 15 40 30 45v10h10v-10h10v10h10v-10c15-5 30-25 30-45 0-20-15-45-45-45Z"/></svg>`;
+}
+
+function syncControlUiFavicon(): void {
+  const root = document.documentElement;
+  const style = getComputedStyle(root);
+  const environmentValue = root.getAttribute(CONTROL_UI_ENVIRONMENT_ATTRIBUTE);
+  const environment: ControlUiEnvironment | null = environmentValue
+    ? JSON.parse(environmentValue)
+    : null;
+  const environmentColor = environment
+    ? style.getPropertyValue(`--control-ui-environment-${environment.color}`).trim()
+    : "";
+  const environmentSvg = environmentColor
+    ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><path fill="${environmentColor}" d="M60 10C30 10 15 35 15 55c0 20 15 40 30 45v10h10v-10h10v10h10v-10c15-5 30-25 30-45 0-20-15-45-45-45Z"/></svg>`)}`
+    : null;
+  const color =
+    faviconStatus === "idle" ? "" : style.getPropertyValue(statusTokens[faviconStatus]).trim();
+  const ring = style.getPropertyValue("--bg").trim();
+  if (!color) {
+    composeFavicon = undefined;
+  }
   for (const icon of document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]')) {
+    if (!environmentSvg && !color) {
+      faviconRequests.delete(icon);
+      if (icon.dataset.openclawOriginalFavicon) {
+        restoreFavicon(icon, JSON.parse(icon.dataset.openclawOriginalFavicon));
+        delete icon.dataset.openclawOriginalFavicon;
+      }
+      continue;
+    }
     icon.dataset.openclawOriginalFavicon ??= JSON.stringify([
       icon.getAttribute("href"),
       icon.getAttribute("type"),
     ]);
-    icon.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
-    icon.type = "image/svg+xml";
+    const original: [string | null, string | null] = JSON.parse(
+      icon.dataset.openclawOriginalFavicon,
+    );
+    const href = environmentSvg ?? original[0];
+    const type = environmentSvg ? "image/svg+xml" : original[1];
+    const signature = JSON.stringify([href, type, color, ring]);
+    if (faviconRequests.get(icon)?.signature === signature) {
+      continue;
+    }
+    const request = { signature };
+    faviconRequests.set(icon, request);
+    if (!color || !href) {
+      restoreFavicon(icon, [href, type]);
+      continue;
+    }
+    composeFavicon ??= createControlUiFaviconComposer();
+    void composeFavicon({ href, type, color, ring }).then(
+      (result) => {
+        // Asset decoding may finish after idle, a palette change, or a context teardown.
+        if (icon.isConnected && faviconRequests.get(icon) === request) {
+          icon.href = result.href;
+          icon.type = result.type;
+        }
+      },
+      (error: unknown) => {
+        if (faviconRequests.get(icon) === request) {
+          faviconRequests.delete(icon);
+          restoreFavicon(icon, [href, type]);
+          console.warn("[openclaw] favicon status could not be composed", error);
+        }
+      },
+    );
   }
 }
