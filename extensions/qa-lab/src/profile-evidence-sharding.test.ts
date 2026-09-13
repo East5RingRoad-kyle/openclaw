@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildQaOccurrenceEvidenceSummary,
   QA_EVIDENCE_SUMMARY_KIND,
-  QA_EVIDENCE_SUMMARY_SCHEMA_VERSION,
   validateQaEvidenceSummaryJson,
   type QaEvidenceOccurrence,
 } from "./evidence-summary.js";
@@ -165,7 +164,7 @@ async function writeShardEvidenceSet(params: {
       evidencePath,
       `${JSON.stringify({
         kind: QA_EVIDENCE_SUMMARY_KIND,
-        schemaVersion: QA_EVIDENCE_SUMMARY_SCHEMA_VERSION,
+        schemaVersion: 2,
         generatedAt: "2026-08-16T00:00:00.000Z",
         evidenceMode: "full",
         entries,

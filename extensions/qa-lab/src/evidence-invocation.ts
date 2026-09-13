@@ -381,5 +381,3 @@ export function createQaEvidenceInvocation(params: {
     snapshot,
   };
 }
-
-export type QaEvidenceInvocation = ReturnType<typeof createQaEvidenceInvocation>;

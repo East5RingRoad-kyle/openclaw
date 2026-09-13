@@ -4,7 +4,7 @@ import {
   getEffectiveQaEvidenceEntries,
   projectQaEvidenceScenarioOutcomes,
   type QaEvidenceIdentity,
-  type QaEvidenceSummaryV2Entry,
+  type QaEvidenceSummaryEntry,
 } from "./evidence-summary.js";
 
 const scenario = { id: "duplicate-label", execution: { kind: "script" as const } };
@@ -23,7 +23,7 @@ const launch: QaEvidenceIdentity = {
 };
 const snapshotOptions = { generatedAt: "2026-09-13T00:00:00.000Z" };
 
-function entry(status: "pass" | "fail"): QaEvidenceSummaryV2Entry {
+function entry(status: "pass" | "fail"): QaEvidenceSummaryEntry {
   return {
     test: { kind: "script-test", id: "duplicate-label", title: "Synthetic check" },
     coverage: [{ id: "channels.dm", role: "primary" }],

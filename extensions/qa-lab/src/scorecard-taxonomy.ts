@@ -36,7 +36,7 @@ const qaCoverageEvidenceRoleSchema = z.enum(["primary", "secondary"]);
 export const qaScorecardEvidenceModeSchema = z.enum(["full", "slim"]);
 export const qaScorecardChannelDriverSchema = z.enum(["qa-channel", "crabline", "live"]);
 
-export const qaProofClassSchema = z.enum([
+const qaProofClassSchema = z.enum([
   "fixture-only",
   "real-plugin/local-protocol",
   "native-host",

@@ -4,7 +4,6 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it } from "vitest";
 import {
   QA_EVIDENCE_SUMMARY_KIND,
-  QA_EVIDENCE_SUMMARY_SCHEMA_VERSION,
   buildPlaywrightEvidenceSummary,
   buildQaOccurrenceEvidenceSummary,
   buildQaSuiteEvidenceSummary,
@@ -174,7 +173,7 @@ describe("evidence summary", () => {
 
     expect(validateQaEvidenceSummaryJson(evidence)).toEqual(evidence);
     expect(evidence.kind).toBe(QA_EVIDENCE_SUMMARY_KIND);
-    expect(evidence.schemaVersion).toBe(QA_EVIDENCE_SUMMARY_SCHEMA_VERSION);
+    expect(evidence.schemaVersion).toBe(2);
     expect(evidence.evidenceMode).toBe("full");
     expect(evidence.profile).toBeUndefined();
     expect(evidence.entries).toHaveLength(1);

@@ -17,7 +17,7 @@ export const QA_EVIDENCE_SUMMARY_KIND = "openclaw.qa.evidence-summary";
 export const QA_EVIDENCE_FILENAME = "qa-evidence.json";
 // Existing producers and historical artifacts retain their exact v2 contract.
 // Only a producer with recorded invocation custody may construct v3.
-export const QA_EVIDENCE_SUMMARY_SCHEMA_VERSION = 2;
+const QA_EVIDENCE_SUMMARY_SCHEMA_VERSION = 2;
 
 const qaEvidenceStatusSchema = z.enum(["pass", "fail", "blocked", "skipped"]);
 const nonEmptyStringSchema = z.string().trim().min(1);
@@ -172,8 +172,6 @@ const qaEvidenceSummarySchema = z.strictObject({
   profilePlan: qaProfileEvidencePlan.schema.optional(),
   scorecard: qaEvidenceScorecardSchema.optional(),
 });
-
-export { qaEvidenceAssertionSchema } from "./evidence-assertion.js";
 
 const qaEvidenceCellSchema = z.strictObject({
   scenarioId: nonEmptyStringSchema,
@@ -412,7 +410,7 @@ export type QaEvidenceTiming = z.infer<typeof qaEvidenceTimingSchema>;
 export type QaEvidenceRttMeasurement = z.infer<typeof qaEvidenceRttMeasurementSchema>;
 export type QaEvidencePackageSource = z.infer<typeof qaEvidencePackageSourceSchema>;
 export type QaEvidenceScorecardJson = z.infer<typeof qaEvidenceScorecardSchema>;
-export type QaEvidenceSummaryV2Entry = z.infer<typeof qaEvidenceSummaryEntrySchema>;
+type QaEvidenceSummaryV2Entry = z.infer<typeof qaEvidenceSummaryEntrySchema>;
 export type QaEvidenceSummaryV3Entry = z.infer<typeof qaEvidenceSummaryV3EntrySchema>;
 export type QaEvidenceSummaryEntry = QaEvidenceSummaryV2Entry | QaEvidenceSummaryV3Entry;
 export type QaEvidenceSummaryV2Json = z.infer<typeof qaEvidenceSummarySchema>;
