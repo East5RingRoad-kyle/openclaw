@@ -1469,22 +1469,23 @@ export async function runCodeModeModelMatrix(
           generatedAt: result.timestamp,
           repoRoot: options.repoRoot,
           results: [result],
-        }).entries.map((entry) => ({
-          ...entry,
-          execution: entry.execution
-            ? {
-                ...entry.execution,
-                artifacts: [
-                  ...entry.execution.artifacts,
-                  {
-                    kind: artifact.kind,
-                    path: artifact.path,
-                    source: artifact.source,
-                  },
-                ],
-              }
-            : undefined,
-        })),
+        }).entries.map((entry) =>
+          Object.assign({}, entry, {
+            execution: entry.execution
+              ? {
+                  ...entry.execution,
+                  artifacts: [
+                    ...entry.execution.artifacts,
+                    {
+                      kind: artifact.kind,
+                      path: artifact.path,
+                      source: artifact.source,
+                    },
+                  ],
+                }
+              : undefined,
+          }),
+        ),
         receipts: [
           { id: `${occurrenceId}:prepared`, phase: "prepared", identity: launch, artifact },
         ],
