@@ -1,14 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { resolvePositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { assertQaSuiteArtifactWritten } from "./artifact-assertion.js";
 import { isRepoRootRelativeRef, toRepoRelativePath } from "./cli-paths.js";
+import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { captureQaEvidenceLaunchIdentity } from "./evidence-environment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   QA_EVIDENCE_FILENAME,
+  buildQaOccurrenceEvidenceSummary,
   getEffectiveQaEvidenceEntries,
   type QaEvidenceOccurrence,
   type QaEvidenceStatus,
@@ -83,6 +85,7 @@ type QaTestFileScenarioResult = {
   includeFallbackEvidence?: boolean;
   logPath: string;
   producerEvidence?: QaEvidenceSummaryJson;
+  producerArtifact?: QaEvidenceOccurrence["receipts"][number]["artifact"];
   scenario: QaTestFileScenario;
   status: QaEvidenceStatus;
 };
@@ -247,7 +250,7 @@ async function runQaTestFileScenario(params: {
   if (params.scenario.execution.kind !== "script") {
     return result;
   }
-  let producerEvidenceResult: Pick<QaTestFileScenarioResult, "producerEvidence">;
+  let producerEvidenceResult: Awaited<ReturnType<typeof readScriptProducerEvidence>>;
   try {
     producerEvidenceResult = await readScriptProducerEvidence({
       outputDir: params.outputDir,
@@ -479,13 +482,18 @@ export async function runQaTestFileScenarios(
       profile: resolveQaEvidenceProfile({ env }),
     });
     const anchorOrder = new Map(invocation.anchors.map((anchor, index) => [anchor.id, index]));
+    const containment = resolveQaEvidenceContainment(summary.occurrences, summary.entries);
+    const byId = new Map(summary.occurrences.map((occurrence) => [occurrence.id, occurrence]));
     const entryOrder = new Map(
-      summary.occurrences.map((occurrence) => [
-        occurrence.id,
-        occurrence.scenario?.kind === "observation"
-          ? (anchorOrder.get(occurrence.scenario.instanceOccurrenceId) ?? 0)
-          : 0,
-      ]),
+      summary.occurrences.map((member) => {
+        const occurrence = byId.get(containment.rootId(member.id))!;
+        return [
+          member.id,
+          occurrence.scenario?.kind === "observation"
+            ? (anchorOrder.get(occurrence.scenario.instanceOccurrenceId) ?? 0)
+            : 0,
+        ] as const;
+      }),
     );
     // Scheduling order stays stable even when longest-budget-first execution differs.
     summary.entries.sort(
@@ -518,6 +526,16 @@ export async function runQaTestFileScenarios(
     };
     const receipts = [
       { id: `${id}:prepared`, phase: "prepared" as const, identity: launch, artifact },
+      ...(result.producerArtifact
+        ? [
+            {
+              id: `${id}:producer`,
+              phase: "prepared" as const,
+              identity: launch,
+              artifact: result.producerArtifact,
+            },
+          ]
+        : []),
       ...(params.preparedDockerEvidence && dockerLaneName(result.scenario)
         ? [structuredClone(params.preparedDockerEvidence.receipt)]
         : []),
@@ -534,17 +552,50 @@ export async function runQaTestFileScenarios(
         result,
         env,
       }).entries;
-    let selectedId = id;
-    if (producer?.schemaVersion === 3) {
-      const selected = invocation.importChild(index, {
-        ...producer,
-        entries: producer.entries.map((entry) => withScenarioCoverage(entry, result.scenario)),
-      });
-      if (selected === null) {
-        throw new Error("native producer returned no selected observation");
+    if (
+      producer?.schemaVersion === 3 ||
+      (producer?.entries.length && result.includeFallbackEvidence)
+    ) {
+      let childEvidence: QaEvidenceSummaryV3Json;
+      if (producer.schemaVersion === 3) {
+        childEvidence = {
+          ...producer,
+          entries: producer.entries.map((entry) => withScenarioCoverage(entry, result.scenario)),
+        };
+      } else {
+        // A v2 reporter has no recorded schedule. Bind its rows only to this
+        // actual read, retaining a distinct producer observation without inventing history.
+        const producerId = randomUUID();
+        childEvidence = buildQaOccurrenceEvidenceSummary({
+          generatedAt: producer.generatedAt,
+          occurrences: [
+            {
+              id: producerId,
+              parentCell: null,
+              scenario: null,
+              retryOf: null,
+              terminalStatus: statusFromProducerEvidence({
+                allowBlockedEvidence: false,
+                producerEvidence: producer,
+              }).status,
+              assertions: null,
+              launch,
+              receipts: [],
+            },
+          ],
+          entries: producer.entries.map((entry) => ({
+            ...withScenarioCoverage(entry, result.scenario),
+            binding: { occurrenceId: producerId, assertionId: null, receiptId: null },
+            effective: true,
+          })),
+        });
       }
-      invocation.complete(id, { status: result.status, entries: [], receipts });
-      selectedId = selected;
+      invocation.complete(id, {
+        status: result.status,
+        childEvidence,
+        receipts,
+        entries: commandRows().map((entry) => ({ ...entry, coverage: [] })),
+      });
     } else {
       const hasProducerEntries = (producer?.entries.length ?? 0) > 0;
       invocation.complete(id, {
@@ -564,16 +615,8 @@ export async function runQaTestFileScenarios(
         receipts,
       });
     }
-    if (producer?.entries.length && result.includeFallbackEvidence) {
-      selectedId = invocation.begin(index, null);
-      invocation.complete(selectedId, {
-        status: result.status,
-        entries: commandRows().map((entry) => Object.assign({}, entry, { coverage: [] })),
-        receipts,
-      });
-    }
-    result.evidenceOccurrenceId = invocation.select(index, selectedId);
-    if (result.evidenceOccurrenceId !== selectedId) {
+    result.evidenceOccurrenceId = invocation.select(index, id);
+    if (result.evidenceOccurrenceId !== id) {
       const selected = invocation.selectedObservation(index)!;
       const first = selected.entries[0];
       result.status = selected.occurrence.terminalStatus ?? "fail";
@@ -584,6 +627,7 @@ export async function runQaTestFileScenarios(
         result.logPath = path.resolve(params.repoRoot, log.artifact.path);
       }
       delete result.producerEvidence;
+      delete result.producerArtifact;
       delete result.includeFallbackEvidence;
     }
     publish();

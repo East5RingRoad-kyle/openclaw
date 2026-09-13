@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
@@ -8,10 +9,10 @@ import {
   validateQaEvidenceSummaryJson,
 } from "./evidence-summary.js";
 
-export async function readJsonFileIfExists(filePath: string): Promise<unknown> {
-  let text: string;
+async function readJsonBytesIfExists(filePath: string) {
+  let bytes: Buffer;
   try {
-    text = await fs.readFile(filePath, "utf8");
+    bytes = await fs.readFile(filePath);
   } catch (error) {
     if (
       error &&
@@ -24,10 +25,14 @@ export async function readJsonFileIfExists(filePath: string): Promise<unknown> {
     throw error;
   }
   try {
-    return JSON.parse(text) as unknown;
+    return { value: JSON.parse(bytes.toString("utf8")) as unknown, bytes };
   } catch (error) {
     throw new Error(`invalid JSON in ${filePath}: ${formatErrorMessage(error)}`, { cause: error });
   }
+}
+
+export async function readJsonFileIfExists(filePath: string): Promise<unknown> {
+  return (await readJsonBytesIfExists(filePath))?.value;
 }
 
 // Producer artifact paths resolve against their evidence bundle. External
@@ -85,7 +90,10 @@ export async function readScriptProducerEvidence(params: {
   requireCurrentRunEvidence?: boolean;
   repoRoot: string;
   scenario: { id: string };
-}): Promise<{ producerEvidence?: QaEvidenceSummaryJson }> {
+}): Promise<{
+  producerEvidence?: QaEvidenceSummaryJson;
+  producerArtifact?: { kind: string; path: string; source: string; sha256: string };
+}> {
   const scenarioOutputDir = path.join(params.outputDir, params.scenario.id);
   const latestRun = await readJsonFileIfExists(path.join(scenarioOutputDir, "latest-run.json"));
   if (
@@ -131,12 +139,22 @@ export async function readScriptProducerEvidence(params: {
         await fs.realpath(evidencePath),
       );
     }
-    const rawEvidence = await readJsonFileIfExists(evidencePath);
-    if (rawEvidence === undefined) {
+    const captured = await readJsonBytesIfExists(evidencePath);
+    if (captured === undefined) {
       continue;
     }
-    const evidence = validateQaEvidenceSummaryJson(rawEvidence);
+    const evidence = validateQaEvidenceSummaryJson(captured.value);
     return {
+      producerArtifact: {
+        kind: "producer-evidence",
+        path: resolveScriptProducerArtifactPath({
+          evidenceDir: path.dirname(evidencePath),
+          repoRoot: params.repoRoot,
+          artifactPath: path.resolve(evidencePath),
+        }),
+        source: "script",
+        sha256: createHash("sha256").update(captured.bytes).digest("hex"),
+      },
       producerEvidence: normalizeScriptProducerEvidence({
         evidence,
         evidencePath,

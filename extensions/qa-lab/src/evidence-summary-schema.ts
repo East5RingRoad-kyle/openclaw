@@ -1,6 +1,7 @@
 // Canonical v2/v3 evidence shapes and occurrence binding validation.
 import { z } from "zod";
 import { qaEvidenceAssertionSchema, qaEvidenceCoverageSchema } from "./evidence-assertion.js";
+import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { qaProfileEvidencePlan } from "./profile-evidence-plan.js";
 import { qaRuntimePairLaneSchema } from "./scenario-catalog.js";
 import { qaScorecardEvidenceModeSchema } from "./scorecard-taxonomy.js";
@@ -216,6 +217,8 @@ const qaEvidenceOccurrenceSchema = z.strictObject({
   // A missing declaration is unknown, not an empty successful assertion set.
   assertions: z.array(qaEvidenceAssertionSchema).nullable(),
   launch: qaEvidenceIdentitySchema,
+  // Direct members of a retained producer bundle; nested ownership stays local.
+  childOccurrenceIds: z.array(nonEmptyStringSchema).min(1).optional(),
   // Reporter metadata cannot stand in for a prepared or target-observed identity.
   receipts: z.array(
     z.strictObject({
@@ -379,6 +382,7 @@ function validateOccurrenceBindings(summary: z.infer<typeof qaEvidenceSummaryV3S
       throw new Error("retry selection contradicts the recorded terminal outcomes");
     }
   }
+  resolveQaEvidenceContainment(summary.occurrences, summary.entries);
 }
 
 const qaEvidenceSummaryV3Schema = qaEvidenceSummaryV3Shape.superRefine((summary, context) => {

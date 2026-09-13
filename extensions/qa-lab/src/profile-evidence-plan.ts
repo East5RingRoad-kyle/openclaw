@@ -1,6 +1,7 @@
 // QA Lab plugin module owns canonical profile scheduling evidence.
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import type { QaEvidenceIdentity, QaEvidenceSummaryJson } from "./evidence-summary.js";
 import type { QaSeedScenarioWithSource } from "./scenario-catalog.js";
 import type { QaScenarioExecutionCell } from "./scenario-lane.js";
@@ -221,6 +222,7 @@ function evaluateProof(
     if (taxonomyStatus) {
       checks.push({ occurrenceId: null, assertionId: null, status: taxonomyStatus });
     } else if (evidence.schemaVersion === 3) {
+      const containment = resolveQaEvidenceContainment(evidence.occurrences, evidence.entries);
       const byId = new Map(evidence.occurrences.map((occurrence) => [occurrence.id, occurrence]));
       const superseded = new Set<string>();
       for (const entry of evidence.entries) {
@@ -242,7 +244,9 @@ function evaluateProof(
         );
         if (
           requirement.retryAcceptance === "selected-attempt" &&
-          (superseded.has(occurrence.id) || rows[0]?.effective === false)
+          (superseded.has(occurrence.id) ||
+            rows[0]?.effective === false ||
+            !containment.isActive(occurrence.id))
         ) {
           continue;
         }

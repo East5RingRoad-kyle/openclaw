@@ -123,7 +123,7 @@ export async function runQaRuntimeParitySuite(params: {
   let parentTransportCleaned = false;
   let terminalScenarios: QaSuiteScenarioResult[] | undefined;
   let publishTerminalResult: (() => Promise<QaSuiteResult>) | undefined;
-  const startedScenarioIds = new Set<string>();
+  const startedScenarioIndexes = new Set<number>();
   try {
     if (params.channelDriver === "live") {
       // The parent only contributes aggregate metadata; release its exclusive
@@ -140,7 +140,7 @@ export async function runQaRuntimeParitySuite(params: {
           params.progressEnabled,
           `runtime pair start (${index + 1}/${params.selectedScenarios.length}): ${scenarioIdForLog}`,
         );
-        progress.markRunning([scenario.id]);
+        progress.markRunning([index]);
         const anchor = recording.invocation.anchors[index]!;
         const comparisonId = recording.invocation.begin(index);
         let recordingComparison = false;
@@ -237,8 +237,8 @@ export async function runQaRuntimeParitySuite(params: {
                 childEvidence = cellResult.evidence;
               }
               const childSelectedId = importChild();
-              for (const startedScenarioId of cellResult.startedScenarioIds) {
-                startedScenarioIds.add(startedScenarioId);
+              if (cellResult.startedScenarioIds.includes(scenario.id)) {
+                startedScenarioIndexes.add(index);
               }
               let scenarioResult =
                 cellResult.scenarios[0] ??
@@ -303,7 +303,7 @@ export async function runQaRuntimeParitySuite(params: {
           const parityScenarioResult = await recording.record(index, comparisonId, parityResult, {
             diagnostic: true,
           });
-          progress.recordScenarioResult(scenario.id, parityScenarioResult);
+          progress.recordScenarioResult(index, parityScenarioResult);
           writeQaSuiteProgress(
             params.progressEnabled,
             `runtime pair ${parityScenarioResult.status} (${index + 1}/${params.selectedScenarios.length}): ${scenarioIdForLog}`,
@@ -386,8 +386,8 @@ export async function runQaRuntimeParitySuite(params: {
         report,
         scenarios,
         startedScenarioIds: params.selectedScenarios
-          .map((scenario) => scenario.id)
-          .filter((scenarioId) => startedScenarioIds.has(scenarioId)),
+          .filter((_scenario, index) => startedScenarioIndexes.has(index))
+          .map((scenario) => scenario.id),
         watchUrl: lab.baseUrl,
       } satisfies QaSuiteResult;
     };

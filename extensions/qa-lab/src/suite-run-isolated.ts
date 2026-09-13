@@ -80,7 +80,7 @@ export async function runQaFlowSuiteIsolated(
   const completedScenarioResults: Array<QaSuiteScenarioResult | undefined> = Array.from({
     length: selectedScenarios.length,
   });
-  const startedScenarioIds = new Set<string>();
+  const startedScenarioIndexes = new Set<number>();
   let artifactWriteQueue = Promise.resolve();
   const writePartialArtifacts = () => {
     const partialScenarios = completedScenarioResults.filter(
@@ -165,7 +165,7 @@ export async function runQaFlowSuiteIsolated(
           progressEnabled,
           `scenario start (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}`,
         );
-        progress.markRunning([scenario.id]);
+        progress.markRunning([index]);
         const anchor = recording.invocation.anchors[index]!;
         const scenarioOutputDir = path.join(outputDir, "scenarios", anchor.id);
         // Dispatch exists before child launch, including failures before its first result.
@@ -215,15 +215,12 @@ export async function runQaFlowSuiteIsolated(
           workerParams.onEvidence = (summary) => {
             childEvidence = structuredClone(summary);
           };
-          startedScenarioIds.add(scenario.id);
+          startedScenarioIndexes.add(index);
           const childSuiteResult: QaSuiteResult = await runQaFlowSuite(workerParams);
           if (childSuiteResult.evidence?.schemaVersion === 3) {
             childEvidence = childSuiteResult.evidence;
           }
           const childSelectedId = importChild();
-          for (const scenarioId of childSuiteResult.startedScenarioIds) {
-            startedScenarioIds.add(scenarioId);
-          }
           let scenarioResult = childSuiteResult.scenarios[0];
           if (!scenarioResult) {
             throw new Error("isolated scenario run returned no scenario result");
@@ -251,7 +248,7 @@ export async function runQaFlowSuiteIsolated(
             });
           }
           dispatchCompleted = true;
-          progress.recordScenarioResult(scenario.id, scenarioResult);
+          progress.recordScenarioResult(index, scenarioResult);
           writeQaSuiteProgress(
             progressEnabled,
             `scenario ${scenarioResult.status} (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}${formatQaScenarioFailureSuffix(scenarioResult)}`,
@@ -285,7 +282,7 @@ export async function runQaFlowSuiteIsolated(
             failure,
             { diagnostic: true },
           );
-          progress.recordScenarioResult(scenario.id, scenarioResult);
+          progress.recordScenarioResult(index, scenarioResult);
           writeQaSuiteProgress(
             progressEnabled,
             `scenario fail (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}${formatQaScenarioFailureSuffix(scenarioResult)}`,
@@ -370,7 +367,9 @@ export async function runQaFlowSuiteIsolated(
     summaryPath,
     report,
     scenarios: terminalScenarios,
-    startedScenarioIds: [...startedScenarioIds],
+    startedScenarioIds: selectedScenarios
+      .filter((_scenario, index) => startedScenarioIndexes.has(index))
+      .map((scenario) => scenario.id),
     watchUrl: lab.baseUrl,
   } satisfies QaSuiteResult;
   writeQaSuiteProgress(progressEnabled, completionProgress);

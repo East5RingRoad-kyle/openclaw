@@ -48,12 +48,19 @@ Repeated scenario names remain separate instances in scheduling order. An
 instance points to its selected result; a null result means no result was
 recorded, not a pass.
 
+Native script attempts retain child bundles with their original instance IDs,
+selection pointers, and a receipt for the exact producer file. Top-level outcomes
+describe the outer scheduled scenarios; nested instances remain inspectable child
+detail. A child bundle run on its own still reports its own scheduled outcomes.
+
 Retries retain the original observations and artifacts. The selected attempt
 controls effective report counts and coverage, while the gallery keeps retained
 rows available for inspection. Selection applies to the whole attempt, not a
 mixture of passing rows from different attempts. Independent diagnostics remain
 independent. Both full and slim evidence preserve occurrence identities, row
 bindings, and artifact receipts; slim output omits detailed execution context.
+An enclosing retry changes whether its retained child bundle contributes to
+effective evidence. It does not rewrite the child's local selection or raw rows.
 
 Readers continue to accept schema v2 artifacts. Historical rows do not acquire
 invented attempt, assertion, runtime, or package identities. Source, package,
@@ -69,6 +76,8 @@ reference, required or advisory obligation, retry policy, and accepted identity
 alternatives. Each alternative names only the source, runtime, package, protocol,
 account, or proof-class dimensions it needs. One bound receipt must satisfy an
 alternative; facts from unrelated observations cannot be combined.
+The `selected-attempt` policy excludes inactive enclosing attempts and their child
+bundles. `all-recorded-attempts` retains their assertions when evaluating proof.
 
 A required missing or incomplete assertion remains unqualified. Conflicting
 pass/fail assertions retain both outcomes. Known identity mismatches are stale;

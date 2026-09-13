@@ -25,6 +25,7 @@ import type {
 } from "./test-file-scenario-runner.js";
 import {
   makeTestFileScenario,
+  resolveScriptAttemptOutputDir,
   writeDockerCandidateManifest,
   writeNativeVitestReport,
 } from "./test-file-scenario-runner.test-support.js";
@@ -389,6 +390,265 @@ describe("qa suite runtime launcher", () => {
       expect(bytes.toString()).toContain(`native ${index + 1}`);
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(artifact.sha256);
     }
+  });
+
+  it("retains open comparison completion before a later child observation in the aggregate", async () => {
+    const repoRoot = await makeTempRepo("qa-aggregate-open-comparison-");
+    const flow = makeQaSuiteTestScenario("flow");
+    const native = makeTestFileScenario("vitest", "test/native.test.ts");
+    vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue({
+      agentIdentityMarkdown: "fixture",
+      kickoffTask: "fixture",
+      scenarios: [flow, native],
+    });
+    const nativeRunner = await vi.importActual<typeof import("./test-file-scenario-runner.js")>(
+      "./test-file-scenario-runner.js",
+    );
+    runQaTestFileScenarios.mockImplementation(async (params) =>
+      nativeRunner.runQaTestFileScenarios({
+        ...params,
+        runCommand: async (command) => {
+          await writeNativeVitestReport(command, { passed: 1 });
+          return { exitCode: 0, stdout: "native passed", stderr: "" };
+        },
+      }),
+    );
+    const defaultFlow = requireDefaultQaFlowSuiteImplementation();
+    let expected: QaEvidenceSummaryV3Json | undefined;
+    runQaFlowSuite.mockImplementation(async (params: QaSuiteRunParams) => {
+      const base = await defaultFlow(params);
+      const child = createQaEvidenceInvocation({
+        scenarios: [flow],
+        channel: params.evidenceAnchors![0]!.parentCell!.channel,
+        launch: params.evidenceAnchors![0]!.launch,
+        anchors: params.evidenceAnchors,
+        continuation: params.evidenceContinuation,
+      });
+      const snapshot = () => child.snapshot({ generatedAt: "2026-09-13T00:00:00.000Z" });
+      const rows = [
+        {
+          test: { kind: "qa-scenario", id: flow.id, title: flow.title },
+          coverage: [],
+          result: { status: "pass" as const },
+        },
+      ];
+      const comparison = child.begin(0, null);
+      params.onEvidence!(snapshot());
+      const first = child.begin(0, null);
+      child.complete(first, { status: "pass", entries: rows });
+      child.select(0, first);
+      params.onEvidence!(snapshot());
+      child.complete(comparison, { status: "pass", entries: rows });
+      child.select(0, comparison);
+      params.onEvidence!(snapshot());
+      const last = child.begin(0, null);
+      child.complete(last, { status: "pass", entries: rows });
+      child.select(0, last);
+      expected = snapshot();
+      params.onEvidence!(expected);
+      return {
+        ...base,
+        evidence: expected,
+        scenarios: [{ name: flow.title, status: "pass", steps: [], evidenceOccurrenceId: last }],
+      };
+    });
+    const result = await runQaSuite({
+      repoRoot,
+      outputDir: "out",
+      scenarioIds: [flow.id, native.id],
+    });
+    const evidence = validateQaEvidenceSummaryJson(
+      JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
+    );
+    if (evidence.schemaVersion !== 3 || !expected) {
+      throw new Error("expected child and aggregate v3 evidence");
+    }
+    for (const occurrence of expected.occurrences) {
+      expect(evidence.occurrences.find((item) => item.id === occurrence.id)).toEqual(occurrence);
+    }
+    expect(projectQaEvidenceScenarioOutcomes(evidence).map((item) => item.status)).toEqual([
+      "pass",
+      "pass",
+    ]);
+  });
+
+  it.each([false, true])(
+    "keeps retained multi-instance script bundles inside repeated outer aggregate instances (failFast=%s)",
+    async (failFast) => {
+      const repoRoot = await makeTempRepo("qa-aggregate-child-bundles-");
+      const script = makeTestFileScenario("script", "scripts/producer.mjs");
+      const nativeScenario = makeTestFileScenario("vitest", "test/native.test.ts");
+      vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue({
+        agentIdentityMarkdown: "fixture",
+        kickoffTask: "fixture",
+        scenarios: [script, nativeScenario],
+      });
+      const native = await vi.importActual<typeof import("./test-file-scenario-runner.js")>(
+        "./test-file-scenario-runner.js",
+      );
+      const capturedChildren: QaEvidenceSummaryV3Json[] = [];
+      runQaTestFileScenarios.mockImplementation(async (params) =>
+        native.runQaTestFileScenarios({
+          ...params,
+          runCommand: async (command) => {
+            if (command.args.includes("--artifact-base")) {
+              const child = createQaEvidenceInvocation({
+                scenarios: [script, script],
+                channel: null,
+                launch: params.evidenceAnchors[0].launch,
+              });
+              const id = child.begin(0);
+              child.complete(id, {
+                status: "pass",
+                entries: [
+                  {
+                    test: { kind: "script", id: "child", title: "Child" },
+                    coverage: [],
+                    result: { status: "pass" },
+                  },
+                ],
+              });
+              child.select(0, id);
+              const snapshot = child.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+              capturedChildren.push(snapshot);
+              await fs.writeFile(
+                path.join(resolveScriptAttemptOutputDir(command), script.id, "qa-evidence.json"),
+                JSON.stringify(snapshot),
+                { flag: "wx" },
+              );
+            } else {
+              await writeNativeVitestReport(command, { passed: 1 });
+            }
+            return { exitCode: 0, stdout: "completed", stderr: "" };
+          },
+        }),
+      );
+      const result = await runQaSuite({
+        repoRoot,
+        outputDir: "out",
+        scenarioIds: [script.id, nativeScenario.id, script.id],
+        failFast,
+      });
+      const evidence = validateQaEvidenceSummaryJson(
+        JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
+      );
+      if (evidence.schemaVersion !== 3) {
+        throw new Error("expected aggregate v3");
+      }
+      expect(capturedChildren).toHaveLength(2);
+      const outcomes = projectQaEvidenceScenarioOutcomes(evidence);
+      expect(outcomes.map((item) => item.scenarioId)).toEqual([
+        script.id,
+        nativeScenario.id,
+        script.id,
+      ]);
+      expect(outcomes.map((item) => item.status)).toEqual(["pass", "pass", "pass"]);
+      expect(result.result.scenarios.map((item) => item.evidenceOccurrenceId)).toEqual(
+        outcomes.map((item) => item.occurrenceId),
+      );
+      for (const child of capturedChildren) {
+        expect(projectQaEvidenceScenarioOutcomes(child).map((item) => item.status)).toEqual([
+          "pass",
+          null,
+        ]);
+        for (const occurrence of child.occurrences) {
+          expect(evidence.occurrences.find((item) => item.id === occurrence.id)).toEqual(
+            occurrence,
+          );
+        }
+      }
+    },
+  );
+
+  it("projects only started root flow instances before collapsing repeated execution cells", async () => {
+    const repoRoot = await makeTempRepo("qa-flow-root-cells-");
+    const first = makeQaSuiteTestScenario("first-flow");
+    const second = makeQaSuiteTestScenario("second-flow");
+    vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue({
+      agentIdentityMarkdown: "fixture",
+      kickoffTask: "fixture",
+      scenarios: [first, second],
+    });
+    const defaultFlow = requireDefaultQaFlowSuiteImplementation();
+    runQaFlowSuite.mockImplementation(async (params: QaSuiteRunParams) => {
+      const base = await defaultFlow(params);
+      expect(params.scenarioIds).toEqual([first.id, second.id, first.id]);
+      const recorded = await createQaSuiteEvidenceInvocation(params, {
+        repoRoot,
+        outputDir: base.outputDir,
+        selectedScenarios: [first, second, first],
+        providerMode: "mock-openai",
+        primaryModel: "mock-openai/gpt-5.6-luna",
+        transportId: "qa-channel",
+      });
+      const id = recorded.invocation.begin(0);
+      const result = await recorded.record(0, id, {
+        name: first.title,
+        status: "fail",
+        steps: [],
+        details: "first failed",
+      });
+      return {
+        ...base,
+        evidence: recorded.snapshot(),
+        scenarios: [result],
+        startedScenarioIds: [first.id],
+      };
+    });
+    const result = await runQaSuite({
+      repoRoot,
+      outputDir: "out",
+      scenarioIds: [first.id, second.id, first.id],
+      failFast: true,
+    });
+    expect(result.expectedCells).toHaveLength(3);
+    expect(result.observedCells).toEqual([
+      {
+        scenarioId: first.id,
+        executionKind: "flow",
+        channel: "qa-channel",
+      },
+    ]);
+    expect(
+      projectQaEvidenceScenarioOutcomes(result.result.evidence!).map((item) => item.status),
+    ).toEqual(["fail", null, null]);
+    expect(result.result.scenarios).toHaveLength(1);
+  });
+
+  it("retains child evidence but rejects a returned result from a foreign observation", async () => {
+    const repoRoot = await makeTempRepo("qa-aggregate-foreign-result-");
+    const scenario = makeTestFileScenario("vitest", "test/native.test.ts");
+    vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue({
+      agentIdentityMarkdown: "fixture",
+      kickoffTask: "fixture",
+      scenarios: [scenario],
+    });
+    const native = await vi.importActual<typeof import("./test-file-scenario-runner.js")>(
+      "./test-file-scenario-runner.js",
+    );
+    runQaTestFileScenarios.mockImplementation(async (params) => {
+      const result = await native.runQaTestFileScenarios({
+        ...params,
+        runCommand: async (command) => {
+          await writeNativeVitestReport(command, { passed: 1 });
+          return { exitCode: 0, stdout: "passed", stderr: "" };
+        },
+      });
+      result.results[0]!.evidenceOccurrenceId = "foreign-observation";
+      return result;
+    });
+    const result = await runQaSuite({ repoRoot, outputDir: "out", scenarioIds: [scenario.id] });
+    expect(result.result.scenarios).toMatchObject([
+      {
+        status: "fail",
+        details: expect.stringContaining("selected observation"),
+      },
+    ]);
+    const evidence = validateQaEvidenceSummaryJson(
+      JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
+    );
+    expect(evidence.entries.map((row) => row.result.status)).toEqual(["pass", "fail"]);
+    expect(projectQaEvidenceScenarioOutcomes(evidence)[0]?.status).toBe("fail");
   });
 
   it("retains all legacy rows once without guessing ambiguous instance owners", async () => {
@@ -2367,14 +2627,13 @@ describe("qa suite runtime launcher", () => {
       },
     ]);
     expect(result.result.scenarios).toHaveLength(3);
-    const evidence = JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")) as {
-      entries?: Array<{
-        result?: { failure?: { reason?: string }; status?: string };
-        test?: { id?: string };
-      }>;
-    };
+    const evidence = validateQaEvidenceSummaryJson(
+      JSON.parse(await fs.readFile(result.result.evidencePath, "utf8")),
+    );
     expect(evidence.entries).toMatchObject([
       { test: { id: "control-ui-assistant-media-tickets" }, result: { status: "pass" } },
+      // The producer's pass remains raw evidence; it cannot replace the missing returned result.
+      { test: { id: "auth-profile-doctor-migration-safety" }, result: { status: "pass" } },
       {
         test: { id: "auth-profile-doctor-migration-safety" },
         result: {
@@ -2383,6 +2642,18 @@ describe("qa suite runtime launcher", () => {
         },
       },
     ]);
+    expect(
+      projectQaEvidenceScenarioOutcomes(evidence).find(
+        (item) => item.scenarioId === "auth-profile-doctor-migration-safety",
+      )?.status,
+    ).toBe("fail");
+    if (evidence.schemaVersion !== 3) {
+      throw new Error("expected v3 evidence");
+    }
+    const retained = evidence.entries[1]!;
+    expect(
+      evidence.occurrences.find((item) => item.id === retained.binding.occurrenceId)?.scenario,
+    ).toBeNull();
   });
 
   it("continues every unified partition after a failure when fail-fast is disabled", async () => {

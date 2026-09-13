@@ -348,6 +348,53 @@ describe("QA runtime parity scenario retry isolation", () => {
     expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();
   });
 
+  it("keeps unstarted repeated flow instances pending after the first failure", async () => {
+    const lab = makeRetryTestLab();
+    const context = makeRetryTestContext();
+    context.selectedScenarios = ["same", "other", "same"].map((id) => {
+      const scenario = makeQaSuiteTestScenario(id);
+      if (scenario.execution.kind === "flow") {
+        scenario.execution.retryCount = 0;
+      }
+      return scenario;
+    });
+    const snapshots: Parameters<QaLabServerHandle["setScenarioRun"]>[0][] = [];
+    vi.mocked(lab.setScenarioRun).mockImplementation((next) => {
+      snapshots.push(structuredClone(next));
+    });
+    const evidence: QaEvidenceSummaryV3Json[] = [];
+    const runScenario = vi.fn<QaSuiteScenarioRunner>().mockResolvedValue({
+      name: "same",
+      status: "fail",
+      details: "first failed",
+      steps: [],
+    });
+    const result = await runQaFlowSuiteStandard(
+      {
+        lab,
+        failFast: true,
+        onEvidence: (summary) => {
+          evidence.push(summary);
+        },
+      },
+      context,
+      runScenario,
+    );
+    expect(runScenario).toHaveBeenCalledTimes(1);
+    expect(result.scenarios).toHaveLength(1);
+    expect(projectQaEvidenceScenarioOutcomes(evidence.at(-1)!).map((item) => item.status)).toEqual([
+      "fail",
+      null,
+      null,
+    ]);
+    expect(snapshots.at(-1)?.scenarios.map((item) => item.status)).toEqual([
+      "fail",
+      "pending",
+      "pending",
+    ]);
+    expect(snapshots.at(-1)?.scenarios.map((item) => item.id)).toEqual(["same", "other", "same"]);
+  });
+
   it.each([false, true])(
     "preserves runner progress through cleanup (failFast=%s)",
     async (failFast) => {

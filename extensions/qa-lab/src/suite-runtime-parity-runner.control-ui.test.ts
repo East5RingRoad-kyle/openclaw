@@ -111,6 +111,27 @@ afterEach(async () => {
 });
 
 describe("runtime parity Control UI ownership", () => {
+  it("preserves repeated parity starts without merging progress slots", async () => {
+    const lab = createControlUiTestLab();
+    const result = await runQaFlowSuiteFromRuntime({
+      repoRoot,
+      outputDir,
+      providerMode: "mock-openai",
+      concurrency: 1,
+      scenarioIds: ["runtime-channel", "runtime-channel"],
+      runtimePair: ["openclaw", "codex"],
+      lab,
+      startLab: async () => lab,
+    });
+    expect(mocks.runQaFlowSuiteStandard).toHaveBeenCalledTimes(4);
+    expect(result.startedScenarioIds).toEqual(["runtime-channel", "runtime-channel"]);
+    const snapshots = vi
+      .mocked(lab.setScenarioRun)
+      .mock.calls.map(([next]) => next?.scenarios.map((item) => item.status));
+    expect(snapshots).toContainEqual(["pass", "pending"]);
+    expect(snapshots.at(-1)).toEqual(["pass", "pass"]);
+  });
+
   it.each([
     {
       label: "a non-Control UI scenario by default",

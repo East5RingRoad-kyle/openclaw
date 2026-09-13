@@ -32,6 +32,60 @@ function entry(status: "pass" | "fail"): QaEvidenceSummaryEntry {
 }
 
 describe("evidence invocation owner", () => {
+  it("reconciles admitted open observations before and after child selection without rewriting history", () => {
+    const parent = createQaEvidenceInvocation({ scenarios: [scenario], channel: null, launch });
+    const child = createQaEvidenceInvocation({
+      scenarios: [scenario],
+      channel: null,
+      launch,
+      anchors: parent.anchors,
+    });
+    const comparison = child.begin(0, null);
+    parent.importChild(0, child.snapshot(snapshotOptions));
+    parent.select(0, null);
+    expect(parent.childInput(0).occurrences.at(-1)?.terminalStatus).toBeNull();
+    const first = child.begin(0, null);
+    child.complete(first, { status: "pass", entries: [entry("pass")] });
+    child.select(0, first);
+    parent.importChild(0, child.snapshot(snapshotOptions));
+    parent.select(0, first);
+    child.complete(comparison, { status: "pass", entries: [{ ...entry("pass"), coverage: [] }] });
+    child.select(0, comparison);
+    parent.importChild(0, child.snapshot(snapshotOptions));
+    parent.select(0, comparison);
+    const second = child.begin(0, null);
+    child.complete(second, { status: "fail", entries: [entry("fail")] });
+    child.select(0, second);
+    parent.importChild(0, child.snapshot(snapshotOptions));
+    parent.select(0, second);
+    expect(parent.snapshot(snapshotOptions)).toEqual(child.snapshot(snapshotOptions));
+    const before = parent.snapshot(snapshotOptions);
+    const changed = structuredClone(before);
+    changed.occurrences.find((item) => item.id === comparison)!.terminalStatus = "fail";
+    expect(() => parent.importChild(0, changed)).toThrow(/completed or immutable/);
+    expect(parent.snapshot(snapshotOptions)).toEqual(before);
+  });
+
+  it("rejects changed launch facts while completing an open child without partial admission", () => {
+    const parent = createQaEvidenceInvocation({ scenarios: [scenario], channel: null, launch });
+    const child = createQaEvidenceInvocation({
+      scenarios: [scenario],
+      channel: null,
+      launch,
+      anchors: parent.anchors,
+    });
+    const id = child.begin(0);
+    parent.importChild(0, child.snapshot(snapshotOptions));
+    parent.select(0, null);
+    const before = parent.snapshot(snapshotOptions);
+    child.complete(id, { status: "pass", entries: [entry("pass")] });
+    child.select(0, id);
+    const changed = child.snapshot(snapshotOptions);
+    changed.occurrences.find((item) => item.id === id)!.launch.source.ref = "other-source";
+    expect(() => parent.importChild(0, changed)).toThrow(/immutable/);
+    expect(parent.snapshot(snapshotOptions)).toEqual(before);
+  });
+
   it.each(["pass", "fail"] as const)(
     "continues only the captured instance and retains its retry history for %s",
     (status) => {

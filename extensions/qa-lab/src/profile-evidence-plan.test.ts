@@ -287,6 +287,54 @@ describe("QA profile evidence plan", () => {
     ).toEqual(["qualified", "stale"]);
   });
 
+  it("applies selected versus all-recorded proof policy through enclosing native attempts", () => {
+    const parent = createQaEvidenceInvocation({
+      scenarios: [{ id: "native", execution: { kind: "script" } }],
+      channel: null,
+      launch: proofIdentity,
+    });
+    for (const status of ["fail", "pass"] as const) {
+      const childEvidence = proofEvidence([{ status }]);
+      const id = parent.begin(0);
+      parent.complete(id, {
+        status,
+        childEvidence,
+        entries: [
+          {
+            test: { kind: "script", id: "native", title: "Native command" },
+            coverage: [],
+            result: { status },
+          },
+        ],
+        receipts: [
+          {
+            id: `${id}:bundle`,
+            phase: "prepared",
+            identity: proofIdentity,
+            artifact: {
+              kind: "producer-evidence",
+              source: "script",
+              path: `${id}/qa-evidence.json`,
+              sha256: "a".repeat(64),
+            },
+          },
+        ],
+      });
+      parent.select(0, id);
+    }
+    const evidence = parent.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+    const raw = structuredClone(evidence);
+    const plan = proofPlan();
+    expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.qualified).toBe(true);
+    plan.proofRequirements[0]!.retryAcceptance = "all-recorded-attempts";
+    expect(
+      qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks.map((check) => check.status),
+    ).toEqual(["failed", "qualified"]);
+    plan.proofRequirements[0]!.obligation = "advisory";
+    expect(qaProfileEvidencePlan.attest(plan, true, evidence).proof?.[0]?.qualified).toBe(false);
+    expect(evidence).toEqual(raw);
+  });
+
   it("keeps historical or stale semantic identity unqualified and leaves absent obligations alone", () => {
     const plan = proofPlan();
     const evidence = proofEvidence([{ status: "pass" }]);

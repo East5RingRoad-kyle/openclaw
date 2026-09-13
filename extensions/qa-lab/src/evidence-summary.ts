@@ -1,5 +1,6 @@
 // QA Lab plugin module implements QA evidence summary behavior.
 import { normalizeSortedUniqueTrimmedStringList } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { resolveQaEvidenceEnvironment } from "./evidence-environment.js";
 import {
   QA_EVIDENCE_SUMMARY_KIND,
@@ -377,9 +378,13 @@ export function buildQaOccurrenceEvidenceSummary(params: {
 export function getEffectiveQaEvidenceEntries(
   summary: QaEvidenceSummaryJson,
 ): QaEvidenceSummaryEntry[] {
-  return summary.schemaVersion === 2
-    ? summary.entries
-    : summary.entries.filter((entry) => entry.effective);
+  if (summary.schemaVersion === 2) {
+    return summary.entries;
+  }
+  const containment = resolveQaEvidenceContainment(summary.occurrences, summary.entries);
+  return summary.entries.filter(
+    (entry) => entry.effective && containment.isActive(entry.binding.occurrenceId),
+  );
 }
 
 export function projectQaEvidenceScenarioOutcomes(
@@ -394,12 +399,19 @@ export function projectQaEvidenceScenarioOutcomes(
     }));
   }
   const occurrences = new Map(summary.occurrences.map((occurrence) => [occurrence.id, occurrence]));
+  const containment = resolveQaEvidenceContainment(summary.occurrences, summary.entries);
   const effective = new Set(
-    summary.entries.filter((entry) => entry.effective).map((entry) => entry.binding.occurrenceId),
+    getEffectiveQaEvidenceEntries(summary).map((entry) =>
+      "binding" in entry ? entry.binding.occurrenceId : null,
+    ),
   );
   const outcomes: QaEvidenceScenarioOutcome[] = [];
   for (const occurrence of summary.occurrences) {
-    if (occurrence.scenario?.kind !== "instance" || !occurrence.parentCell) {
+    if (
+      occurrence.scenario?.kind !== "instance" ||
+      !occurrence.parentCell ||
+      containment.parentById.has(occurrence.id)
+    ) {
       continue;
     }
     const selectedId = occurrence.scenario.resultOccurrenceId;

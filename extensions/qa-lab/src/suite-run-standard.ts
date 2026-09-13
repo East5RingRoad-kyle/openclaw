@@ -250,7 +250,7 @@ export async function runQaFlowSuiteStandard(
         `scenario start (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}`,
       );
       sampleGatewayProcessRss(`scenario:${scenario.id}:start`);
-      progress.markRunning([scenario.id]);
+      progress.markRunning([index]);
 
       const scenarioBootstrapFinishedAt = new Date();
       let scenarioExecutionStartedAt = scenarioBootstrapFinishedAt;
@@ -357,7 +357,7 @@ export async function runQaFlowSuiteStandard(
         progressEnabled,
         `scenario ${scenarioResult.status} (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}${formatQaScenarioFailureSuffix(scenarioResult)}`,
       );
-      progress.recordScenarioResult(scenario.id, scenarioResult);
+      progress.recordScenarioResult(index, scenarioResult);
       if (params?.failFast === true && scenarioResult.status === "fail") {
         break;
       }

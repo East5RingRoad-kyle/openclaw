@@ -18,6 +18,42 @@ import type { QaSuiteRunner, QaSuiteScenarioResult, QaSuiteScenarioRunner } from
 import * as suite from "./suite.js";
 
 describe("isolated QA suite nested publication", () => {
+  it("preserves repeated isolated starts and independent progress slots", async () => {
+    const lab = createCleanupTestLab();
+    const context = createCleanupTestContext();
+    context.repoRoot = await tempDirs.makeTempDir("qa-isolated-repeated-");
+    context.outputDir = path.join(context.repoRoot, "output");
+    context.concurrency = 1;
+    context.selectedScenarios = [makeQaSuiteTestScenario("same"), makeQaSuiteTestScenario("same")];
+    let calls = 0;
+    const runChild = vi.fn<QaSuiteRunner>().mockImplementation(async (params) => {
+      calls += 1;
+      return {
+        outputDir: params!.outputDir!,
+        evidencePath: "",
+        reportPath: "",
+        summaryPath: "",
+        report: "",
+        scenarios: [{ name: "same", status: calls === 1 ? "fail" : "pass", steps: [] }],
+        startedScenarioIds: ["same"],
+        watchUrl: lab.baseUrl,
+      };
+    });
+    const result = await runQaFlowSuiteIsolated(
+      { lab, startLab: async () => createCleanupTestLab() },
+      context,
+      runChild,
+    );
+    expect(result.startedScenarioIds).toEqual(["same", "same"]);
+    expect(result.scenarios.map((item) => item.status)).toEqual(["fail", "pass"]);
+    expect(
+      vi
+        .mocked(lab.setScenarioRun)
+        .mock.calls.at(-1)?.[0]
+        ?.scenarios.map((item) => item.status),
+    ).toEqual(["fail", "pass"]);
+  });
+
   it("preserves nested publication ownership through concurrent worker runtime preparation", async () => {
     vi.stubEnv("OPENCLAW_QA_SUITE_PROGRESS", "1");
     const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
