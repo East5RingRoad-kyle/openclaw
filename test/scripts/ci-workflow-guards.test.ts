@@ -17457,7 +17457,7 @@ fi
     expect(validateManifestStep.run).toContain("QA evidence manifest profile must be all");
     expect(validateManifestStep.run).toContain("manifest.targetSha !== targetSha");
     expect(validateManifestStep.run).toMatch(
-      /qaProfileEvidencePlan\.attest\(\s*evidence\.profilePlan,\s*manifest\.qaPassed === true,?\s*\)/u,
+      /qaProfileEvidencePlan\.attest\(\s*evidence\.profilePlan,\s*manifest\.qaPassed === true,\s*evidence,?\s*\)/u,
     );
     expect(validateManifestStep.run).toContain("profilePlanSha256");
     expect(validateManifestStep.run).toContain("rerun the QA Profile Evidence workflow");
