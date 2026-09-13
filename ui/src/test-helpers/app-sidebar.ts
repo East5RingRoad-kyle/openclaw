@@ -10,6 +10,7 @@ import type { GatewayBrowserClient } from "../api/gateway.ts";
 import type { AgentsListResult, GatewaySessionRow, SessionsListResult } from "../api/types.ts";
 import type { NavigationRouteId } from "../app-navigation.ts";
 import type { RouteId } from "../app-route-paths.ts";
+import type { ShellRouteState } from "../app/app-host-route-state.ts";
 import { createApplicationConfigCapability } from "../app/config.ts";
 import type {
   ApplicationContext,
@@ -57,6 +58,7 @@ export type SidebarLifecycleState = HTMLElement & {
   basePath: string;
   hiddenSessionCatalogIds: ReadonlySet<string>;
   activeRouteId?: string;
+  contextualSidebar?: ShellRouteState["contextualSidebar"];
   enabledRouteIds?: readonly NavigationRouteId[];
   connected: boolean;
   offline: boolean;

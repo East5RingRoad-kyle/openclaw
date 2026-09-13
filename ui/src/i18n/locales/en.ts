@@ -17,6 +17,7 @@ export const en: TranslationMap & {
   updates: TranslationMap;
   login: TranslationMap;
   skillWorkshop: TranslationMap;
+  systems: TranslationMap;
 } = {
   pluginUi: {
     customize: "Customize UI",
@@ -2377,6 +2378,7 @@ export const en: TranslationMap & {
     toggle: "Toggle desktop panel",
     reconnect: "Reconnect",
   },
+  systems: {},
   routeTitles: {
     modelProviders: "Models",
     notifications: "Notifications",
@@ -2397,6 +2399,7 @@ export const en: TranslationMap & {
     channels: "Channels",
     connection: "Gateway",
     sessions: "Sessions",
+    systems: "Systems",
     usage: "Usage",
     cron: "Automations",
     tasks: "Tasks",
@@ -2444,6 +2447,7 @@ export const en: TranslationMap & {
     channels: "Channels and settings.",
     connection: "Gateway endpoint, credentials, and handshake status.",
     sessions: "Active sessions and defaults.",
+    systems: "Machines, execution environments, and remote desktops.",
     usage: "API usage and costs.",
     cron: "Scheduled tasks and recurring agent runs.",
     tasks: "Background tasks: subagents, automation runs, CLI.",

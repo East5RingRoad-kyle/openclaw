@@ -280,6 +280,25 @@ function committedRouterState(
 }
 
 describe("OpenClaw app lifecycle", () => {
+  it("binds contextual navigation to the same rendered route as the workspace", () => {
+    const data = { source: "host" };
+    const renderSidebar = vi.fn(() => "Machine inventory");
+    const state = committedRouterState("systems", "/systems", data);
+    Object.assign(state.matches[0]!, { status: "success", module: { renderSidebar } });
+    const sidebar = selectShellRouteState(state).contextualSidebar;
+    expect(sidebar?.key).toBe("systems");
+    expect(sidebar?.render()).toBe("Machine inventory");
+    expect(renderSidebar).toHaveBeenCalledWith(data, false, true);
+
+    // A cold import keeps the current main page, so its contextual list stays too.
+    state.pendingMatches = [
+      { ...state.matches[0]!, routeId: "tasks", status: "pending", module: undefined },
+    ];
+    expect(selectShellRouteState(state).contextualSidebar?.key).toBe("systems");
+    Object.assign(state.pendingMatches[0]!, { status: "error", error: new Error("Route failed") });
+    expect(selectShellRouteState(state).contextualSidebar).toBeUndefined();
+  });
+
   it("hides revealed login credentials when the app connection epoch ends", () => {
     const app = document.createElement("openclaw-app") as unknown as AppLifecycleState;
     app.loginShowGatewaySecret = true;

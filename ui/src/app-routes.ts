@@ -58,6 +58,7 @@ import { page as secretsPage } from "./pages/secrets/route.ts";
 import { page as sessionsPage } from "./pages/sessions/route.ts";
 import { page as skillWorkshopPage } from "./pages/skill-workshop/route.ts";
 import { pages as skillsPages } from "./pages/skills/route.ts";
+import { page as systemsPage } from "./pages/systems/route.ts";
 import { page as tasksPage } from "./pages/tasks/route.ts";
 import { page as terminalPage } from "./pages/terminal/route.ts";
 import { page as usagePage } from "./pages/usage/route.ts";
@@ -67,6 +68,8 @@ import { page as worktreesPage } from "./pages/worktrees/route.ts";
 
 type AppRouteModule = {
   render: (data: unknown, loaderPending: boolean, presented?: boolean) => unknown;
+  /** Optional lower-sidebar content owned by the same route and loader as the page. */
+  renderSidebar?: (data: unknown, loaderPending: boolean, presented?: boolean) => unknown;
   retainOnNavigate?: boolean;
   renderOwnerKey?: (
     match: Pick<RouteMatch, "data" | "location">,
@@ -109,6 +112,7 @@ const APP_ROUTE_TREE = [
   workboardPage,
   worktreesPage,
   sessionsPage,
+  systemsPage,
   secretsPage,
   usagePage,
   debugPage,

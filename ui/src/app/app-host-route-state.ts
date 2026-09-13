@@ -10,6 +10,7 @@ export type ShellRouteState = {
   committedRouteId?: RouteId;
   committedLocation?: RouteLocation;
   committedSessionKey?: string;
+  contextualSidebar?: { key: RouteId; render: () => unknown };
 };
 
 function sessionKeyFromRouteData(routeId: RouteId, data: unknown): string | undefined {
@@ -25,6 +26,11 @@ function sessionKeyFromRouteData(routeId: RouteId, data: unknown): string | unde
 export function selectShellRouteState(routerState: RouterState<RouteId>): ShellRouteState {
   const match = selectRenderedRouteMatch(routerState.matches[0], routerState.pendingMatches[0]);
   const committedMatch = routerState.matches[0];
+  const module = match?.module;
+  const renderSidebar =
+    module && typeof module === "object" && "renderSidebar" in module
+      ? module.renderSidebar
+      : undefined;
   const committedSessionKey = committedMatch
     ? sessionKeyFromRouteData(committedMatch.routeId, committedMatch.data)
     : undefined;
@@ -42,5 +48,18 @@ export function selectShellRouteState(routerState: RouterState<RouteId>): ShellR
       ? { committedRouteId: committedMatch.routeId, committedLocation: committedMatch.location }
       : {}),
     ...(committedSessionKey ? { committedSessionKey } : {}),
+    // Use the same selected match as the main outlet. Cold imports retain both
+    // surfaces together; failed routes must not leave actionable stale context.
+    ...(match &&
+    (match.status === "success" || match.status === "pending") &&
+    match.error === undefined &&
+    typeof renderSidebar === "function"
+      ? {
+          contextualSidebar: {
+            key: match.routeId,
+            render: () => renderSidebar(match.data, match.isFetching === "loader", true),
+          },
+        }
+      : {}),
   };
 }

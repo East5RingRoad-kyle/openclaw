@@ -3,6 +3,7 @@ import { property } from "lit/decorators.js";
 import { DEFAULT_SIDEBAR_ENTRIES, type NavigationRouteId } from "../app-navigation.ts";
 import type { RouteId } from "../app-route-paths.ts";
 import { selectApplicationSession } from "../app/agent-selection.ts";
+import type { ShellRouteState } from "../app/app-host-route-state.ts";
 import {
   applicationContext,
   type ApplicationContext,
@@ -23,6 +24,7 @@ import type { NewSessionTarget } from "../pages/new-session/location.ts";
 export abstract class AppSidebarBase extends OpenClawLightDomContentsElement {
   @property({ attribute: false }) basePath = "";
   @property({ attribute: false }) activeRouteId?: NavigationRouteId;
+  @property({ attribute: false }) contextualSidebar?: ShellRouteState["contextualSidebar"];
   @property({ attribute: false }) activePluginTabId = "";
   @property({ attribute: false }) enabledRouteIds?: readonly NavigationRouteId[];
   @property({ attribute: false }) connected = false;
