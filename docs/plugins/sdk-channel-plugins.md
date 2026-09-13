@@ -539,11 +539,13 @@ provider-owned access checks: `read`, `search`, `reactions`, `list-pins`,
 provider, account, and conversation context. Provider destination policies remain
 in force; this does not grant unrestricted account access.
 
-An adapter opts in with `actions.supportsReadAuthority: true` and includes the
-action in `actions.providerOwnedReadGates`. Only host-verified official
-registrations qualify. Discord and Slack implement this contract. Older adapters
-and unverified plugins retain the exact-current-conversation restriction. Write
-actions and other read-capable actions are unchanged.
+An adapter lists each supported action in `actions.readAuthorityActions` and
+includes it in `actions.providerOwnedReadGates`. The host permits only the six
+actions above; a later host addition does not opt existing adapters into it.
+Only host-verified official registrations qualify. Discord implements all six;
+Slack implements `read`, `reactions`, and `list-pins`. Older external adapters and unverified
+plugins retain the exact-current-conversation restriction. Write actions and
+other read-capable actions are unchanged.
 
 The transport contract is mandatory for opt-in adapters:
 
@@ -556,11 +558,15 @@ The transport contract is mandatory for opt-in adapters:
   fence. A thrown error stops the request; do not retry with a new callback.
 
 The host binds the callback to the selected registration and its active lifecycle.
-For Gateway agent requests, it also retains the originating run's live authority.
-It rejects stale action results and errors after either authority is revoked. A completed action
-also closes its captured callbacks. The fence prevents subsequent requests; it
-cannot undo a request already sent to the provider. No configuration switch or
-plugin-supplied trust field can mint this authority.
+Local message tools and Gateway agent requests retain the originating run and
+turn authority. Opted-in bundled reads use the same lifetime fence while keeping
+their existing provider-owned admission rules. A bundled artifact or an omitted
+scoped registration cannot supply that authority; delegated execution requires
+the active registered instance. The host rejects stale
+action results and errors after either caller or plugin authority is revoked.
+A completed action also closes its captured callbacks. The fence prevents
+subsequent requests; it cannot undo a request already sent to the provider. No
+configuration switch or plugin-supplied trust field can mint this authority.
 
 ## Advanced topics
 

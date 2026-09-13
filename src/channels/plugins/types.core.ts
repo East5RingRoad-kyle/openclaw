@@ -803,12 +803,12 @@ export type ChannelMessageActionAdapter = {
   /** Delegate conversation-read authorization to this adapter for bundled registrations only. */
   providerOwnedReadGates?: true | readonly ChannelMessageActionName[];
   /**
-   * Opt into host-fenced read-only actions for loader-verified official installs.
+   * Opt into these host-fenced context actions for loader-verified official installs.
    * Every provider request must captureChannelReadAuthority() at submission and
    * invoke that check immediately before each I/O attempt, including queued retries.
    * Does not extend conversation-read mutation authority or bypass provider policy.
    */
-  supportsReadAuthority?: true;
+  readAuthorityActions?: readonly ChannelMessageActionName[];
   supportsAction?: (params: { action: ChannelMessageActionName }) => boolean;
   resolveExecutionMode?: (params: { action: ChannelMessageActionName }) => "local" | "gateway";
   resolveCliActionRequest?: (params: {

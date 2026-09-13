@@ -131,7 +131,7 @@ function resolveServerOwnedConversationReadOrigin(
 }
 
 type MessageActionReadEnforcement =
-  | { kind: "provider-owned"; fenced?: true }
+  | { kind: "provider-owned"; pluginTrust: "bundled" | "external"; fenced: boolean }
   | {
       kind: "host-exact-current";
       pluginTrust: "bundled" | "external";
@@ -151,19 +151,20 @@ function resolveMessageActionReadEnforcement(params: {
   action: ChannelMessageActionName;
   actions: ChannelPlugin["actions"];
   pluginOrigin: string | undefined;
-  hasOfficialReadAuthority: boolean;
+  hasReadAuthority: boolean;
 }): MessageActionReadEnforcement {
   const providerOwnedReadGates = params.actions?.providerOwnedReadGates;
   if (providerOwnedReadGates === true || providerOwnedReadGates?.includes(params.action) === true) {
+    const fencedReadAction =
+      params.actions?.readAuthorityActions?.includes(params.action) === true &&
+      FENCED_PROVIDER_READ_ACTIONS.has(params.action);
     if (params.pluginOrigin === "bundled") {
-      return { kind: "provider-owned" };
+      // Bundled admission stays provider-owned, but an opted-in read must use
+      // its registered lifecycle owner rather than an unfenced artifact fallback.
+      return { kind: "provider-owned", pluginTrust: "bundled", fenced: fencedReadAction };
     }
-    if (
-      params.hasOfficialReadAuthority &&
-      params.actions?.supportsReadAuthority === true &&
-      FENCED_PROVIDER_READ_ACTIONS.has(params.action)
-    ) {
-      return { kind: "provider-owned", fenced: true };
+    if (params.hasReadAuthority && fencedReadAction) {
+      return { kind: "provider-owned", pluginTrust: "external", fenced: true };
     }
   }
   return {
@@ -569,7 +570,7 @@ function prepareMessageActionReadContext(
     action,
     actions: registration.plugin.actions,
     pluginOrigin: registration.origin,
-    hasOfficialReadAuthority: authority?.() === true,
+    hasReadAuthority: authority?.() === true,
   });
   const assertCallerCurrent = ctx.assertDirectAdapterHandoff;
   const assertReadAuthorityCurrent =
@@ -623,6 +624,7 @@ function enforceMessageActionConversationReadGate(params: {
     // Restore cross-conversation reads, not missing-origin or cross-account authority.
     if (
       params.enforcement.fenced &&
+      params.enforcement.pluginTrust === "external" &&
       (!hasMatchingCurrentProviderContext(params.ctx) ||
         !hasMatchingCurrentAccountContext(params.ctx) ||
         !hasCurrentConversationTarget(params.ctx))

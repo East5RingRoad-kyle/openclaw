@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { discordPlugin } from "../extensions/discord/api.js";
 import { slackPlugin } from "../extensions/slack/api.js";
 import { createOperationalRunInstanceRef } from "../src/agents/admitted-run-context.js";
+import { wrapToolWithGatewayCallerIdentity } from "../src/agents/tools/gateway-caller-context.js";
+import { createMessageTool } from "../src/agents/tools/message-tool-execution.js";
 import { dispatchChannelMessageAction } from "../src/channels/plugins/message-action-dispatch.js";
 import type { ChannelMessageActionContext } from "../src/channels/plugins/types.js";
+import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../src/config/config.js";
 import { createAgentRuntimeApprovalAuthorityValidator } from "../src/gateway/agent-runtime-identity-token.js";
 import {
   mintMessageActionTurnCapability,
@@ -15,6 +18,7 @@ import type { GatewayClient, GatewayRequestContext } from "../src/gateway/server
 import {
   claimAgentRunDelegatedAuthority,
   releaseAgentRunDelegatedAuthority,
+  validateAgentRunDelegatedAuthority,
 } from "../src/infra/agent-run-registry.js";
 import { createPluginRegistry } from "../src/plugins/registry.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../src/plugins/runtime.js";
@@ -39,10 +43,18 @@ function createOriginatingRun(channel: string, mode: string) {
   const sessionKey = `agent:main:${channel}:channel:origin`;
   const operationalRunInstance = createOperationalRunInstanceRef(`read-${channel}-${mode}`);
   const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+  const toolContext = {
+    currentChannelProvider: channel,
+    currentChannelId: channel === "discord" ? current : "C9876543210",
+    currentChatType: "channel" as const,
+  };
   const turnCapability = mintMessageActionTurnCapability({
     agentId: "main",
     runId: operationalRunInstance.runId,
     sessionKey,
+    requesterAccountId: "default",
+    requesterSenderId: "synthetic-requester",
+    toolContext,
   });
   const runGuard = createAgentRuntimeAuthorityGuard(
     {
@@ -67,8 +79,26 @@ function createOriginatingRun(channel: string, mode: string) {
   }
   runGuard();
   return {
+    wrapTool: (tool: ReturnType<typeof createMessageTool>) =>
+      wrapToolWithGatewayCallerIdentity(tool, {
+        agentId: "main",
+        sessionKey,
+        operationalRunInstance,
+        receiptAuthority: () => validateAgentRunDelegatedAuthority(delegatedAuthority),
+      }),
+    toolOptions: {
+      agentId: "main",
+      agentAccountId: "default",
+      agentSessionKey: sessionKey,
+      runId: operationalRunInstance.runId,
+      messageActionTurnCapability: turnCapability,
+      ...toolContext,
+    },
     assert: runGuard,
-    revoke: () => revokeMessageActionTurnCapability(turnCapability),
+    revoke: () =>
+      mode.includes("claim")
+        ? releaseAgentRunDelegatedAuthority(delegatedAuthority)
+        : revokeMessageActionTurnCapability(turnCapability),
     dispose: () => {
       revokeMessageActionTurnCapability(turnCapability);
       releaseAgentRunDelegatedAuthority(delegatedAuthority);
@@ -86,6 +116,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   resetPluginRuntimeStateForTest();
+  clearRuntimeConfigSnapshot();
   endpointPreparation.beforeLookup = undefined;
 });
 
@@ -101,6 +132,10 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
     "legacy",
     "run-revoked-direct",
     "run-result-revoked-direct",
+    "bundled-allowed",
+    "bundled-revoked",
+    "bundled-run-revoked-direct",
+    "bundled-run-result-revoked-direct",
   ] as const;
   const cases =
     channel === "discord"
@@ -110,17 +145,28 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
           "endpoint-lookup-revoked" as const,
           "endpoint-content-lookup-revoked" as const,
         ]
-      : [...modes];
+      : [
+          ...modes,
+          "tool-allowed" as const,
+          "tool-run-preparation-revoked" as const,
+          "tool-run-revoked" as const,
+          "tool-run-claim-revoked" as const,
+          "tool-run-result-revoked" as const,
+          "tool-run-retry-revoked" as const,
+          "bundled-tool-allowed" as const,
+          "bundled-tool-run-claim-revoked" as const,
+        ];
   it.each(cases)("routes a cross-conversation read through the provider (%s)", async (mode) => {
     const owner = createPluginRegistry({
       logger: { info() {}, warn() {}, error() {}, debug() {} },
       runtime: {} as PluginRuntime,
       activateGlobalSideEffects: false,
     });
+    const bundledRegistration = mode.startsWith("bundled-");
     const record = createPluginRecord({
       id: channel,
-      origin: "global",
-      trustedOfficialInstall: true,
+      origin: bundledRegistration ? "bundled" : "global",
+      trustedOfficialInstall: !bundledRegistration,
     });
     const provider = channel === "discord" ? discordPlugin : slackPlugin;
     const plugin = {
@@ -129,15 +175,17 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
       status: undefined,
       actions: {
         ...provider.actions!,
-        supportsReadAuthority: mode === "legacy" ? undefined : (true as const),
+        readAuthorityActions:
+          mode === "legacy" ? undefined : provider.actions?.readAuthorityActions,
       },
     };
     owner.registry.plugins.push(record);
     owner.createApi(record, { config: {}, registrationMode: "full" }).registerChannel({ plugin });
     setActivePluginRegistry(owner.registry);
-    const runRevocation = mode.startsWith("run-");
+    const usesMessageTool = mode.includes("tool-");
+    const runRevocation = mode.includes("run-");
     const resultRevocation = mode.includes("result");
-    const run = runRevocation ? createOriginatingRun(channel, mode) : undefined;
+    const run = runRevocation || usesMessageTool ? createOriginatingRun(channel, mode) : undefined;
     const requests: string[] = [];
     const isContent = (url: string) =>
       url.includes("/messages") || url.includes("conversations.history");
@@ -158,7 +206,7 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
         if (runRevocation && !resultRevocation) {
           run?.revoke();
         }
-        if (mode === "revoked") {
+        if (mode === "revoked" || mode === "bundled-revoked") {
           record.enabled = false;
         }
         if (channel === "slack" && url.startsWith("/api/conversations.info")) {
@@ -180,7 +228,12 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
           return;
         }
       }
-      response.writeHead(200, { "content-type": "application/json" });
+      const retryMetadata =
+        mode === "tool-run-retry-revoked" && !isContent(url) && requests.length === 1;
+      response.writeHead(retryMetadata ? 429 : 200, {
+        "content-type": "application/json",
+        "retry-after": "0",
+      });
       response.end(JSON.stringify(body));
     });
     await new Promise<void>((resolve) => {
@@ -262,8 +315,38 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
           currentChannelId: channel === "discord" ? current : "C9876543210",
         },
       };
-      const invocation = dispatchChannelMessageAction(actionContext);
-      if (mode === "allowed" || mode === "endpoint-allowed") {
+      if (usesMessageTool) {
+        setRuntimeConfigSnapshot(actionContext.cfg, actionContext.cfg);
+      }
+      const messageTool = usesMessageTool
+        ? run!.wrapTool(
+            createMessageTool({
+              ...run!.toolOptions,
+              config: actionContext.cfg,
+              getScopedChannelsCommandSecretTargets: () => ({ targetIds: new Set<string>() }),
+              resolveCommandSecretRefsViaGateway: async ({ config }) => {
+                if (mode === "tool-run-preparation-revoked") {
+                  run!.revoke();
+                }
+                return {
+                  resolvedConfig: config,
+                  diagnostics: [],
+                  targetStatesByPath: {},
+                  hadUnresolvedTargets: false,
+                };
+              },
+            }),
+          )
+        : undefined;
+      const invocation = messageTool
+        ? messageTool.execute("read-context", {
+            action: "read",
+            channel,
+            target: `channel:${slackTarget}`,
+            limit: 1,
+          })
+        : dispatchChannelMessageAction(actionContext);
+      if (mode.endsWith("allowed")) {
         expect(await invocation).not.toBeNull();
         expect(requests.filter(isContent)).toHaveLength(1);
       } else {
@@ -287,10 +370,17 @@ describe.each(["discord", "slack"] as const)("official %s provider read boundary
         expect(requests.filter(isContent)).toHaveLength(
           mode === "result-revoked" || (runRevocation && resultRevocation) ? 1 : 0,
         );
-        if (mode === "legacy" || mode === "account") {
+        if (mode === "legacy" || mode === "account" || mode === "tool-run-preparation-revoked") {
           expect(requests).toEqual([]);
         }
-        if (mode === "revoked") {
+        if (
+          mode === "revoked" ||
+          mode === "bundled-revoked" ||
+          mode === "tool-run-revoked" ||
+          mode === "tool-run-claim-revoked" ||
+          mode === "bundled-tool-run-claim-revoked" ||
+          mode === "tool-run-retry-revoked"
+        ) {
           expect(requests).toHaveLength(1);
         }
         if (mode === "endpoint-lookup-revoked") {

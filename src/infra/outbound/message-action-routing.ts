@@ -453,6 +453,7 @@ export async function prepareMessageRoute(params: {
         input.conversationReadOrigin,
       ),
       toolContext: authorization !== undefined ? authorization.toolContext : input.toolContext,
+      assertDirectAdapterHandoff: input.assertDirectAdapterHandoff,
     });
     actionParams = preparedRead.params;
     assertReadAuthorityCurrent = preparedRead.assertReadAuthorityCurrent;

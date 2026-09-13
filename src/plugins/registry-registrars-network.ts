@@ -311,7 +311,7 @@ export function createNetworkRegistrars(state: PluginRegistryState) {
       });
       const isCurrent = () =>
         ownerCurrent?.() === true &&
-        record.trustedOfficialInstall === true &&
+        (record.origin === "bundled" || record.trustedOfficialInstall === true) &&
         entry !== undefined &&
         getPluginRecordRegistry(registry, record).channels.includes(entry) &&
         entry.pluginId === record.id &&
