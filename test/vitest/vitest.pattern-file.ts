@@ -186,7 +186,12 @@ function intersectDirectoryTestPattern(
 ): string[] | null {
   const candidateRoot = directoryTestPatternRoot(candidatePattern);
   if (candidateRoot === null) {
-    return null;
+    return includePatterns.some((pattern) => {
+      const includeRoot = directoryTestPatternRoot(pattern);
+      return includeRoot !== null && patternIsFullyUnderDirectory(candidatePattern, includeRoot);
+    })
+      ? [candidatePattern]
+      : null;
   }
 
   const result: string[] = [];
@@ -223,6 +228,10 @@ export function intersectIncludePatterns(
     if (!isPlainRepoRelativePath(candidate)) {
       if (literalIncludes) {
         result.push(...includePatterns.filter((include) => matchesVitestGlob(include, candidate)));
+        continue;
+      }
+      if (includePatterns.includes(candidate)) {
+        result.push(candidate);
         continue;
       }
       // Watch directory targets retain their glob so newly added tests appear.

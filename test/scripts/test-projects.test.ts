@@ -44,6 +44,7 @@ import {
   channelSurfaceContractPatterns,
 } from "../vitest/vitest.contracts-shared.ts";
 import { databaseWorkerCoreTestFiles } from "../vitest/vitest.database-worker-core-paths.mjs";
+import { databaseWorkerExtensionTestFiles } from "../vitest/vitest.extension-database-workers-paths.mjs";
 
 const normalizeRepoPath = toRepoPath;
 const CODEX_TEST_PROCESS_FILE_LIMIT = 12;
@@ -342,18 +343,19 @@ describe("test runtime prerequisites", () => {
   });
 });
 
-function expectedCodexTestProcessCount() {
-  const testFileCount = listExtensionTestFilesForRoots(["extensions/codex"]).length;
-  return Math.max(1, Math.ceil(testFileCount / CODEX_TEST_PROCESS_FILE_LIMIT));
+function listOrdinaryExtensionFiles(root: string) {
+  return listExtensionTestFilesForRoots([root]).filter(
+    (file) => !databaseWorkerExtensionTestFiles.includes(file),
+  );
 }
 
 function expectedMatrixTestProcessCount() {
-  const testFileCount = listExtensionTestFilesForRoots(["extensions/matrix"]).length;
+  const testFileCount = listOrdinaryExtensionFiles("extensions/matrix").length;
   return Math.max(1, Math.ceil(testFileCount / MATRIX_TEST_PROCESS_FILE_LIMIT));
 }
 
 function expectedTelegramTestProcessCount() {
-  const testFileCount = listExtensionTestFilesForRoots(["extensions/telegram"]).length;
+  const testFileCount = listOrdinaryExtensionFiles("extensions/telegram").length;
   return Math.max(1, Math.ceil(testFileCount / TELEGRAM_TEST_PROCESS_FILE_LIMIT));
 }
 
@@ -362,9 +364,13 @@ function listExpectedFullExtensionRunPlans() {
   const matrixConfig = "test/vitest/vitest.extension-matrix.config.ts";
   const telegramConfig = "test/vitest/vitest.extension-telegram.config.ts";
   const boundedPlansByConfig = new Map([
-    [codexConfig, buildVitestRunPlans(["extensions/codex"], process.cwd())],
-    [matrixConfig, buildVitestRunPlans(["extensions/matrix"], process.cwd())],
-    [telegramConfig, buildVitestRunPlans(["extensions/telegram"], process.cwd())],
+    [codexConfig, buildVitestRunPlans([codexConfig], process.cwd())],
+    [matrixConfig, buildVitestRunPlans([matrixConfig], process.cwd())],
+    [telegramConfig, buildVitestRunPlans([telegramConfig], process.cwd())],
+    [
+      "test/vitest/vitest.extension-database-workers.config.ts",
+      buildVitestRunPlans(["test/vitest/vitest.extension-database-workers.config.ts"]),
+    ],
   ]);
   return listFullExtensionVitestProjectConfigs().flatMap(
     (config) =>
@@ -2181,6 +2187,44 @@ describe("scripts/test-projects changed-target routing", () => {
   });
 
   it.each([
+    ["src/agents/**/*.test.ts", "src/agents/**/memory-*.test.ts", "src/agents/**/memory-*.test.ts"],
+    [
+      "extensions/matrix",
+      "extensions/matrix/**/storage.test.ts",
+      "extensions/matrix/**/storage.test.ts",
+    ],
+    [
+      "extensions/matrix/**/storage.test.ts",
+      "extensions/matrix/**/*.test.ts",
+      "extensions/matrix/**/storage.test.ts",
+    ],
+    [
+      "extensions/matrix/**/storage.test.ts",
+      "extensions/matrix/**/storage.test.ts",
+      "extensions/matrix/**/storage.test.ts",
+    ],
+  ])("retains watch intersection for %s and %s", (directory, pattern, expected) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-worker-watch-scope-"));
+    try {
+      const includeFile = path.join(tempDir, "include.json");
+      fs.writeFileSync(includeFile, JSON.stringify([pattern]));
+      const specs = createVitestRunSpecs(["--watch", directory], {
+        baseEnv: { OPENCLAW_VITEST_INCLUDE_FILE: includeFile },
+      });
+      expect(specs).toHaveLength(1);
+      expect(specs[0]?.includePatterns).toContain(expected);
+      expect(
+        specs[0]?.includePatterns?.every(
+          (value) => value === expected || path.matchesGlob(value, expected),
+        ),
+      ).toBe(true);
+      expect(specs[0]?.watchMode).toBe(true);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
     ["src/agents/**/*.test.ts", "test/plugins"],
     ["src/plugin-sdk/memory-host-events.test.ts", "src/plugin-sdk/provider-auth.test.ts"],
     ["src/plugin-sdk/outbound-media.bulk.test.ts", "src/plugin-sdk/provider-auth.test.ts"],
@@ -3393,15 +3437,15 @@ describe("scripts/test-projects changed-target routing", () => {
       ]),
     ).toEqual([
       {
-        config: "test/vitest/vitest.extension-active-memory.config.ts",
-        forwardedArgs: [],
-        includePatterns: ["extensions/active-memory/index.test.ts"],
-        watchMode: false,
-      },
-      {
         config: "test/vitest/vitest.extension-codex.config.ts",
         forwardedArgs: [],
         includePatterns: ["extensions/codex/index.test.ts"],
+        watchMode: false,
+      },
+      {
+        config: "test/vitest/vitest.extension-database-workers.config.ts",
+        forwardedArgs: [],
+        includePatterns: ["extensions/active-memory/index.test.ts"],
         watchMode: false,
       },
     ]);
@@ -3414,7 +3458,12 @@ describe("scripts/test-projects changed-target routing", () => {
     const plans = buildVitestRunPlans(["extensions"], process.cwd());
     const matrixPlans = plans.filter((plan) => plan.config === matrixConfig);
     const telegramPlans = plans.filter((plan) => plan.config === telegramConfig);
-    const boundedConfigs = new Set([codexConfig, matrixConfig, telegramConfig]);
+    const boundedConfigs = new Set([
+      codexConfig,
+      matrixConfig,
+      telegramConfig,
+      "test/vitest/vitest.extension-database-workers.config.ts",
+    ]);
 
     expect(plans.filter((plan) => !boundedConfigs.has(plan.config))).toEqual(
       listFullExtensionVitestProjectConfigs()
@@ -3433,7 +3482,7 @@ describe("scripts/test-projects changed-target routing", () => {
       ),
     ).toBe(true);
     expect(matrixPlans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/matrix"]),
+      listOrdinaryExtensionFiles("extensions/matrix"),
     );
     expect(telegramPlans).toHaveLength(expectedTelegramTestProcessCount());
     expect(
@@ -3442,7 +3491,7 @@ describe("scripts/test-projects changed-target routing", () => {
       ),
     ).toBe(true);
     expect(telegramPlans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/telegram"]),
+      listOrdinaryExtensionFiles("extensions/telegram"),
     );
     expect(plans).toEqual(listExpectedFullExtensionRunPlans());
   });
@@ -3466,7 +3515,7 @@ describe("scripts/test-projects changed-target routing", () => {
       ),
     ).toBe(true);
     expect(plans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/telegram"]),
+      listOrdinaryExtensionFiles("extensions/telegram"),
     );
   });
 
@@ -3549,34 +3598,64 @@ describe("scripts/test-projects changed-target routing", () => {
     }
   });
 
-  it("bounds an explicit Matrix directory target across process lifetimes", () => {
-    const plans = buildVitestRunPlans(["extensions/matrix"], process.cwd());
+  it.each([
+    {
+      directory: "extensions/matrix/src/matrix/client",
+      selected: "extensions/matrix/src/matrix/client/storage.test.ts",
+      inherited: [
+        "extensions/matrix/src/matrix/client/storage.test.ts",
+        "extensions/matrix/src/matrix/thread-bindings.test.ts",
+      ],
+    },
+    {
+      directory: "extensions/matrix/src/matrix/sdk",
+      selected: "extensions/matrix/src/matrix/sdk/idb-persistence.test.ts",
+      inherited: ["extensions/matrix/**/*.test.ts"],
+    },
+  ])(
+    "intersects $directory and inherited worker selections before emitting include files",
+    ({ directory, selected, inherited }) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-worker-selection-"));
+      try {
+        const includeFile = path.join(tempDir, "include.json");
+        fs.writeFileSync(includeFile, JSON.stringify(inherited));
+        const specs = createVitestRunSpecs([directory], {
+          baseEnv: { OPENCLAW_VITEST_INCLUDE_FILE: includeFile },
+        });
+        const worker = specs.find(
+          (spec) => spec.config === "test/vitest/vitest.extension-database-workers.config.ts",
+        );
+        expect(worker?.includePatterns).toEqual([selected]);
+        expect(specs.flatMap((spec) => spec.includePatterns ?? [])).not.toContain(
+          "extensions/matrix/src/matrix/thread-bindings.test.ts",
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 
-    expect(plans).toHaveLength(expectedMatrixTestProcessCount());
-    expect(
-      plans.every((plan) => plan.config === "test/vitest/vitest.extension-matrix.config.ts"),
-    ).toBe(true);
-    expect(
-      plans.every((plan) => (plan.includePatterns?.length ?? 0) <= MATRIX_TEST_PROCESS_FILE_LIMIT),
-    ).toBe(true);
-    expect(plans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/matrix"]),
-    );
-  });
-
-  it("bounds an explicit Codex directory target across process lifetimes", () => {
-    const config = "test/vitest/vitest.extension-codex.config.ts";
-    const plans = buildVitestRunPlans(["extensions/codex"], process.cwd());
-
+  it.each([
+    ["matrix", MATRIX_TEST_PROCESS_FILE_LIMIT],
+    ["codex", CODEX_TEST_PROCESS_FILE_LIMIT],
+    ["telegram", TELEGRAM_TEST_PROCESS_FILE_LIMIT],
+  ] as const)("bounds an explicit %s directory across both database owners", (name, limit) => {
+    const root = `extensions/${name}`;
+    const plans = buildVitestRunPlans([root]);
+    const selected = plans.flatMap((plan) => plan.includePatterns ?? []);
     expect(plans.length).toBeGreaterThan(1);
-    expect(plans).toHaveLength(expectedCodexTestProcessCount());
-    expect(plans.every((plan) => plan.config === config)).toBe(true);
-    expect(
-      plans.every((plan) => (plan.includePatterns?.length ?? 0) <= CODEX_TEST_PROCESS_FILE_LIMIT),
-    ).toBe(true);
-    expect(plans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/codex"]),
-    );
+    expect(plans.every((plan) => (plan.includePatterns?.length ?? 0) <= limit)).toBe(true);
+    expect(selected.toSorted()).toEqual(listExtensionTestFilesForRoots([root]).toSorted());
+    expect(new Set(selected).size).toBe(selected.length);
+    for (const plan of plans) {
+      for (const file of plan.includePatterns ?? []) {
+        expect(plan.config).toBe(
+          databaseWorkerExtensionTestFiles.includes(file)
+            ? "test/vitest/vitest.extension-database-workers.config.ts"
+            : `test/vitest/vitest.extension-${name}.config.ts`,
+        );
+      }
+    }
   });
 
   it("keeps an explicit Codex file target in one process", () => {
@@ -3603,38 +3682,55 @@ describe("scripts/test-projects changed-target routing", () => {
 
     const plans = buildVitestRunPlans(["extensions/matrix", testFile], process.cwd());
 
-    expect(plans).toHaveLength(expectedMatrixTestProcessCount());
+    expect(plans.length).toBeGreaterThan(1);
     expect(
       plans.every((plan) => (plan.includePatterns?.length ?? 0) <= MATRIX_TEST_PROCESS_FILE_LIMIT),
     ).toBe(true);
-    expect(plans.flatMap((plan) => plan.includePatterns ?? [])).toEqual(
-      listExtensionTestFilesForRoots(["extensions/matrix"]),
+    expect(plans.flatMap((plan) => plan.includePatterns ?? []).toSorted()).toEqual(
+      listExtensionTestFilesForRoots(["extensions/matrix"]).toSorted(),
     );
   });
 
-  it("keeps a grouped Matrix config target in the unsplit plan", () => {
-    expectSingleVitestRunPlan(
-      buildVitestRunPlans(
-        ["extensions/matrix", "test/vitest/vitest.extension-matrix.config.ts"],
-        process.cwd(),
-      ),
-      { config: "test/vitest/vitest.extension-matrix.config.ts" },
-    );
+  it("keeps a grouped Matrix config target unsplit beside its worker tests", () => {
+    const plans = buildVitestRunPlans([
+      "extensions/matrix",
+      "test/vitest/vitest.extension-matrix.config.ts",
+    ]);
+    expect(plans).toEqual([
+      {
+        config: "test/vitest/vitest.extension-database-workers.config.ts",
+        forwardedArgs: [],
+        includePatterns: databaseWorkerExtensionTestFiles.filter((file) =>
+          file.startsWith("extensions/matrix/"),
+        ),
+        watchMode: false,
+      },
+      {
+        config: "test/vitest/vitest.extension-matrix.config.ts",
+        forwardedArgs: [],
+        includePatterns: null,
+        watchMode: false,
+      },
+    ]);
   });
 
   it("keeps explicit Matrix files and watch runs unchunked", () => {
     const testFile = listExtensionTestFilesForRoots(["extensions/matrix"])[0];
     expect(testFile).toBeDefined();
-
-    expect(buildVitestRunPlans([testFile!], process.cwd())).toHaveLength(1);
-    expectSingleVitestRunPlan(
-      buildVitestRunPlans(["--watch", "extensions/matrix"], process.cwd()),
+    expect(buildVitestRunPlans([testFile!])).toHaveLength(1);
+    const plans = buildVitestRunPlans(["--watch", "extensions/matrix"]);
+    expect(plans).toEqual([
       {
-        config: "test/vitest/vitest.extension-matrix.config.ts",
-        includePatterns: ["extensions/matrix/**/*.test.ts"],
+        config: "test/vitest/vitest.database-worker-watch.config.ts",
+        databaseWorkerWatchOwner: "test/vitest/vitest.extension-matrix.config.ts",
+        databaseWorkerWatchTests: databaseWorkerExtensionTestFiles.filter((file) =>
+          file.startsWith("extensions/matrix/"),
+        ),
+        forwardedArgs: [],
+        includePatterns: expect.arrayContaining(["extensions/matrix/**/*.test.ts"]),
         watchMode: true,
       },
-    );
+    ]);
   });
 
   it("narrows default-lane changed source files to affected tests", () => {
@@ -4094,7 +4190,9 @@ describe("scripts/test-projects changed-target routing", () => {
       includePatterns: ["ui/src/e2e/**/*.test.ts"],
     });
 
-    expect(createVitestRunSpecs(["ui/src/e2e"])[0]?.pnpmArgs).toContain("--configLoader");
+    expect(createVitestRunSpecs(["ui/src/e2e"], { baseEnv: {} })[0]?.pnpmArgs).toContain(
+      "--configLoader",
+    );
   });
 
   it("routes auto-reply route source files to route regression tests", () => {
