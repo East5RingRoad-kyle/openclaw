@@ -163,13 +163,9 @@ export function renderDesktopPicker(options: {
 }) {
   if (options.automatic) {
     return html`<div class="desktop-status" role="status">
-      ${
-        options.loading
-          ? t("desktop.connecting")
-          : html`<button class="desktop-button" type="button" @click=${options.onRefresh}>
-              ${t("common.retry")}
-            </button>`
-      }
+      <button class="desktop-button" type="button" @click=${options.onRefresh}>
+        ${t("common.retry")}
+      </button>
     </div>`;
   }
   return html`

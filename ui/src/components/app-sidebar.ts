@@ -72,19 +72,11 @@ import {
   isCommunityInviteEligible,
 } from "./community-invite-state.ts";
 import { icons } from "./icons.ts";
-import {
-  lobsterPetSeed,
-  resolveLobsterPetMode,
-  resolveLobsterRunOutcome,
-} from "./lobster-pet-contract.ts";
 import { renderPanelRefreshStatus } from "./panel-refresh-status.ts";
 import { SessionOrganizerController } from "./session-organizer-controller.ts";
 import { SidebarContextController } from "./sidebar-context-controller.ts";
 import { SidebarMenusController } from "./sidebar-menus-controller.ts";
 import { SidebarPeopleController } from "./sidebar-people-controller.ts";
-// The shared loader retries transient chunk failures online; a deploy-pruned
-// chunk still stays off until reload when that retry fails, by design.
-const lobsterPetImport = createIdleImport(() => import("./lobster-pet.runtime.ts"));
 
 class AppSidebar extends AppSidebarSessionNavigationElement implements SessionListHost {
   @state() teamOnlineExpanded = false;
@@ -172,7 +164,6 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
       (plugins, notify) => plugins.subscribe(notify),
     );
   private readonly nativeGatewaysChanged = () => this.sidebarMenus.closeSessionMenu();
-  private readonly refreshAppearanceSettings = () => this.context?.theme.refresh();
   private readonly hiddenSessionCatalogsChanged = () => {
     this.hiddenSessionCatalogIds = loadStoredHiddenSessionCatalogIds();
   };
@@ -358,9 +349,6 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
     );
     window.addEventListener("storage", this.communityInviteStorageChanged);
     this.syncCommunityInviteState();
-    // The decorative pet's large module stays out of startup and upgrades in place.
-    // Its first visit is at least 15 seconds after load, so idle loading cannot miss one.
-    lobsterPetImport.schedule();
     this.catalogRendererImport.schedule();
   }
 
@@ -709,18 +697,6 @@ class AppSidebar extends AppSidebarSessionNavigationElement implements SessionLi
           </div>
           <div class="sidebar-shell__invite">
             ${this.communityInvitePresentation === "shown" ? renderCommunityInviteCard(this.dismissCommunityInvite) : nothing}
-            <openclaw-lobster-pet
-              .seed=${lobsterPetSeed(this.sessionKey)}
-              .mode=${resolveLobsterPetMode(
-                !this.offline,
-                this.sessionData.sessionsResult?.sessions,
-              )}
-              .runOutcome=${resolveLobsterRunOutcome(this.sessionData.sessionsResult?.sessions)}
-              .visitsEnabled=${this.lobsterPetVisits}
-              .soundsEnabled=${this.lobsterPetSounds}
-              .gatewayVersion=${this.gatewayVersion}
-              .onVisitsDisabled=${this.refreshAppearanceSettings}
-            ></openclaw-lobster-pet>
           </div>
           <div class="sidebar-shell__footer">
             ${

@@ -46,7 +46,7 @@ import {
   receiveBrowserAnnotation as admitBrowserAnnotation,
 } from "./chat-pane-browser-annotation.ts";
 import { SIDEBAR_PANEL_SHORTCUTS } from "./chat-pane-panel-shortcuts.ts";
-import { releaseAttachmentWorkspaceOwner } from "./chat-pane-rails.ts";
+import { openPreferredSidebarPanel, releaseAttachmentWorkspaceOwner } from "./chat-pane-rails.ts";
 import { ChatPaneSessionCreation } from "./chat-pane-session-creation.ts";
 import { ChatPaneSessionPanelToggleController } from "./chat-pane-session-panel-toggle.ts";
 import {
@@ -65,6 +65,7 @@ import {
   applyChatAgentOwnerTransition,
   applySelectedChatAgent,
   refreshPageChat,
+  refreshChatMetadata,
   retireChatMetadataRequests,
 } from "./chat-state-refresh.ts";
 import { resetChatViewState } from "./chat-view-state.ts";
@@ -82,7 +83,7 @@ import {
   readChatSessionSnapshot,
   resolveChatSnapshotKey,
 } from "./session-message-cache.ts";
-import { closeSlot, isSidebarSlotVisible, openSlot } from "./sidebar-layout.ts";
+import { closeSlot, isSidebarSlotVisible } from "./sidebar-layout.ts";
 
 export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
   private readonly sessionPanelToggles = new ChatPaneSessionPanelToggleController({
@@ -254,7 +255,9 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
         releaseAttachmentWorkspaceOwner(state, slot);
       }
       this.commitSidebarLayout(
-        visible ? closeSlot(state.sidebarLayout, slot) : openSlot(state.sidebarLayout, slot),
+        visible
+          ? closeSlot(state.sidebarLayout, slot)
+          : openPreferredSidebarPanel(state, state.sidebarLayout, slot),
       );
       return;
     }
@@ -328,6 +331,17 @@ export abstract class ChatPaneLifecycle extends ChatPaneSessionCreation {
       chatState.createRenderLifecycle(),
       this,
       this.chatMessagesBySession,
+    );
+    pageState.chatMetadataIsPresented = () =>
+      this.presented && document.visibilityState !== "hidden";
+    const refreshPresentedMetadata = () => {
+      if (pageState.chatMetadataIsPresented?.()) {
+        void refreshChatMetadata(pageState, { automatic: true });
+      }
+    };
+    document.addEventListener("visibilitychange", refreshPresentedMetadata);
+    chatState.addCleanup(() =>
+      document.removeEventListener("visibilitychange", refreshPresentedMetadata),
     );
     const paneAgentId = parseAgentSessionKey(this.sessionKey)?.agentId ?? this.agentId;
     if (paneAgentId) {

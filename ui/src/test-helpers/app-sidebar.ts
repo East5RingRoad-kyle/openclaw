@@ -109,10 +109,6 @@ export type SidebarLifecycleState = HTMLElement & {
   variant: "panel" | "drawer";
 };
 
-export type LobsterPetElement = HTMLElement & {
-  runOutcome: "ok" | "error" | "aborted";
-};
-
 export type TestSessionMenu = HTMLElement & {
   forkDisabled: boolean;
   forkFromLastCompleted: boolean;

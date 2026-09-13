@@ -87,13 +87,8 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
   @state() private canResize = false;
 
   private readonly connection = new DesktopConnectionHandoff();
-  private readonly launcher = new DesktopAppLauncher(this, () => ({
-    client: this.client,
-    source: this.source,
-    state: this.state,
-    presented: !this.embedded || this.presented,
-    apps: this.desktopApps,
-  }));
+  private readonly launcher = new DesktopAppLauncher(() => this.requestUpdate());
+
   private readonly pictureInPicture = new DesktopPictureInPicture(this, () => this.state);
   private credentials: DesktopCredentials | undefined;
   private credentialAuth: "vnc-password" | "ard-account" | undefined;
@@ -205,19 +200,27 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
     }
     const gatewayAvailabilityChanged = changed.has("client") || changed.has("available");
     // Embedded source props track placement without replacing a picker's explicit choice.
-    const presentationChanged =
+    const contextChanged =
       gatewayAvailabilityChanged ||
       changed.has("embedded") ||
-      changed.has("presented") ||
       changed.has("documentMode") ||
       (changed.has("requestedSource") &&
         (!this.embedded || this.suppliedEnvironments !== null || this.usesAutomaticSource)) ||
       changed.has("sessionKey") ||
       changed.has("documentControl");
-    if ((this.documentMode || this.embedded) && presentationChanged) {
+    if ((this.documentMode || this.embedded) && contextChanged) {
       // Release input and invalidate pending work before resolving a different session or machine.
       this.returnToPicker("pending");
       if (this.available && (!this.embedded || (this.presented && this.refreshOnPresentation))) {
+        void this.refreshEnvironments();
+      }
+    } else if (this.embedded && changed.has("presented") && this.state !== "disconnected") {
+      this.pictureInPicture.close();
+      this.mobileKeyboard.reset();
+      if (
+        this.connection.setPresented(this.presented, () => this.returnToPicker("pending")) &&
+        this.refreshOnPresentation
+      ) {
         void this.refreshEnvironments();
       }
     } else if (gatewayAvailabilityChanged) {
@@ -306,6 +309,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
 
   private returnToPicker(sourceSelection: typeof this.sourceSelection = "picker"): void {
     this.sessionSource.invalidate();
+    this.loading = false;
     this.disconnectConnection();
     this.launcher.clear();
     this.state = "picker";
@@ -574,12 +578,14 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
   }
 
   private handleDesktopDisconnect(
-    environmentId: string,
+    environmentId: string | null,
     { code, reason, clean }: desktopTransport.DesktopDisconnectDetail,
   ): void {
+    this.sessionSource.invalidate();
+    this.loading = false;
     this.disconnectConnection();
     this.launcher.clear();
-    if (code === 1008 && this.credentialAuth === "ard-account") {
+    if (code === 1008 && this.credentialAuth === "ard-account" && environmentId !== null) {
       this.credentials = this.credentials?.username
         ? { username: this.credentials.username }
         : undefined;
@@ -598,6 +604,8 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
       code === 4000 &&
       (reason === "control-taken" || reason?.startsWith("control-taken:")) &&
       this.controlling &&
+      environmentId !== null &&
+      (!this.embedded || this.presented) &&
       !this.controlTakeoverRecoveryUsed
     ) {
       const operator = formatUiExternalText(reason.slice("control-taken:".length));
@@ -614,6 +622,21 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
     this.disconnectedReason =
       formatUiExternalText(reason, code ? t("desktop.closeCode", { code: String(code) }) : "") ||
       (!clean ? t("desktop.errors.connectionFailed") : null);
+  }
+
+  private launchApp(app: DesktopAppId): void {
+    const { client, source } = this;
+    if (
+      !client ||
+      (this.embedded && !this.presented) ||
+      source?.kind !== "environment" ||
+      (this.state !== "connecting" && this.state !== "connected") ||
+      !this.desktopApps.includes(app) ||
+      this.launcher.app === app
+    ) {
+      return;
+    }
+    void this.launcher.launch(client, source, app);
   }
 
   override render() {
@@ -644,7 +667,7 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
       inventoryError: this.state === "inventory-error",
       reason: this.disconnectedReason,
       onRetry: () => {
-        if (this.state === "inventory-error" && (this.documentMode || !this.environmentId)) {
+        if ((this.state === "inventory-error" && this.documentMode) || !this.environmentId) {
           if (this.sourceSelection !== "picker") {
             this.sourceSelection = "pending";
           }
@@ -659,7 +682,20 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
         void this.connectEnvironment(this.environmentId, this.controlling);
       },
     });
-    const content = { state: this.state, notice, picker, credentials, recovery } as const;
+    // Source lookup and RFB authentication share the same stage and loading indicator.
+    const content = {
+      state:
+        this.state === "picker" &&
+        this.loading &&
+        this.usesAutomaticSource &&
+        (this.sessionKey !== null || this.requestedSource !== null)
+          ? "connecting"
+          : this.state,
+      notice,
+      picker,
+      credentials,
+      recovery,
+    } as const;
     const sizing = {
       mode: this.sizingMode,
       canResize: this.canResize && this.controlling && this.state === "connected",
@@ -710,14 +746,10 @@ class OpenClawDesktopPanel extends OpenClawLitElement {
         showApps: this.source?.kind === "environment",
         sizing,
         pictureInPictureControl: this.pictureInPicture.renderButton(),
-        onLaunch: (app) => void this.launcher.launch(app),
+        onLaunch: (app) => this.launchApp(app),
         onTakeControl: () => void this.connectEnvironment(this.environmentId, true),
         onDisconnect: () => {
-          if (
-            this.embedded &&
-            (this.sessionKey !== null || this.suppliedEnvironments !== null) &&
-            this.environmentId !== null
-          ) {
+          if (this.embedded && (this.sessionKey !== null || this.suppliedEnvironments !== null)) {
             this.handleDesktopDisconnect(this.environmentId, { clean: true });
           } else {
             this.returnToPicker();
