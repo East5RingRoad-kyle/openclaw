@@ -571,9 +571,11 @@ function prepareMessageActionReadContext(
     pluginOrigin: registration.origin,
     hasOfficialReadAuthority: authority?.() === true,
   });
+  const assertCallerCurrent = ctx.assertDirectAdapterHandoff;
   const assertReadAuthorityCurrent =
     origin !== "direct-operator" && enforcement.kind === "provider-owned" && enforcement.fenced
       ? () => {
+          assertCallerCurrent?.();
           if (!authority?.()) {
             throw new Error(`Plugin ${ctx.channel} read authority is no longer active.`);
           }

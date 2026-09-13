@@ -550,12 +550,14 @@ The transport contract is mandatory for opt-in adapters:
 - Capture `captureChannelReadAuthority()` from `openclaw/plugin-sdk/fetch-runtime`
   when submitting each request, before handing it to a shared queue.
 - Retain that exact callback through waits and retries; invoke it immediately
-  before every provider request, including target lookup requests.
+  before every provider request, including target lookup requests, after any
+  asynchronous DNS or dispatcher preparation.
 - An absent callback means this invocation has no additional read-authority
   fence. A thrown error stops the request; do not retry with a new callback.
 
-The host binds the callback to the selected registration and its active lifecycle,
-and rejects stale action results and errors after revocation. A completed action
+The host binds the callback to the selected registration and its active lifecycle.
+For Gateway agent requests, it also retains the originating run's live authority.
+It rejects stale action results and errors after either authority is revoked. A completed action
 also closes its captured callbacks. The fence prevents subsequent requests; it
 cannot undo a request already sent to the provider. No configuration switch or
 plugin-supplied trust field can mint this authority.

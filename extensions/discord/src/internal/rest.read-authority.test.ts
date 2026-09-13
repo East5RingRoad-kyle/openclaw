@@ -53,6 +53,37 @@ describe("Discord read request authority", () => {
     await expect(client.get("/channels/100/messages")).resolves.toEqual({ id: "other" });
   });
 
+  it("passes the queued request's assertion through asynchronous transport preparation", async () => {
+    const firstResponse = createDeferred<Response>();
+    const reader = authority();
+    const transport = vi.fn();
+    const fetch = vi
+      .fn(
+        async (_input: string | URL | Request, _init?: RequestInit, beforeRequest?: () => void) => {
+          expect(beforeRequest).toBe(reader.assert);
+          reader.revoke();
+          await Promise.resolve();
+          beforeRequest?.();
+          transport();
+          return Response.json([]);
+        },
+      )
+      .mockImplementationOnce(() => firstResponse.promise);
+    const client = new RequestClient("synthetic-token", {
+      fetch,
+      scheduler: { maxConcurrency: 1 },
+    });
+    const first = client.get("/channels/100/messages");
+    scope.current = reader.assert;
+    const queued = client.get("/channels/100/messages");
+    const rejected = expect(queued).rejects.toThrow("read authority revoked");
+    scope.current = authority().assert;
+    firstResponse.resolve(Response.json([]));
+    await first;
+    await rejected;
+    expect(transport).not.toHaveBeenCalled();
+  });
+
   it("does not make the retry request after a rate-limit wait revokes authority", async () => {
     const reader = authority();
     const fetch = vi.fn(async () => {

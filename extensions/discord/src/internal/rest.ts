@@ -8,7 +8,7 @@ import {
   resolveTimerTimeoutMs,
 } from "openclaw/plugin-sdk/number-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
-import { getDiscordEndpointRuntime } from "../endpoint-runtime.js";
+import { getDiscordEndpointRuntime, type DiscordEndpointRuntime } from "../endpoint-runtime.js";
 import { serializeRequestBody } from "./rest-body.js";
 import {
   DiscordError,
@@ -163,7 +163,7 @@ function isZlibMaxOutputLengthError(err: unknown): boolean {
 export class RequestClient {
   readonly options: NormalizedRequestClientOptions;
   protected token: string;
-  protected customFetch: RequestClientOptions["fetch"];
+  protected customFetch: DiscordEndpointRuntime["fetch"] | undefined;
   protected requestControllers = new Set<AbortController>();
   private scheduler: RestScheduler<RequestDispatchData>;
 
@@ -273,12 +273,11 @@ export class RequestClient {
     this.requestControllers.add(controller);
     try {
       assertReadAuthority?.();
-      const response = await (this.customFetch ?? fetch)(url, {
-        method,
-        headers,
-        body,
-        signal,
-      });
+      const init = { method, headers, body, signal };
+      const response =
+        this.customFetch && assertReadAuthority
+          ? await this.customFetch(url, init, assertReadAuthority)
+          : await (this.customFetch ?? fetch)(url, init);
       const text = await readResponseBodyText(response, this.options.timeout ?? 15_000);
       const parsed = coerceResponseBody(text);
       this.scheduler.recordResponse(routeKey, path, response, parsed);

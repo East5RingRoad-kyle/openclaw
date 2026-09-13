@@ -187,7 +187,11 @@ export async function requestDiscord<T>(
   const assertReadAuthority = captureChannelReadAuthority();
   const endpoint =
     options?.endpointRuntime === undefined ? getDiscordEndpointRuntime() : options.endpointRuntime;
-  const fetchImpl = resolveFetch(endpoint?.fetch ?? options?.fetcher ?? fetch);
+  const fetchImpl = resolveFetch(
+    endpoint
+      ? (input, init) => endpoint.fetch(input, init, assertReadAuthority)
+      : (options?.fetcher ?? fetch),
+  );
   if (!fetchImpl) {
     throw new Error("fetch is not available");
   }
