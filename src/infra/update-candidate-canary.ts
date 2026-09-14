@@ -311,7 +311,7 @@ export async function validateUpdateCandidateCanary(params: {
       throw new Error("Cannot check migrations without changing the running service");
     }
     phase = "snapshot";
-    activeStep = { name: "candidate snapshot", command: "candidate snapshot" };
+    activeStep = { name: "Preparing update checks", command: "Preparing update checks" };
     stepStartedAt = Date.now();
     rehearsal ??= await prepareUpdateCandidateRehearsal({
       candidateRoot: params.root,
