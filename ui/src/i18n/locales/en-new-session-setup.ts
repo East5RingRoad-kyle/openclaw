@@ -4,6 +4,31 @@ import { en } from "./en.ts";
 // Session setup messages load with their consumers instead of every UI startup.
 const enNewSessionSetup = {
   newSession: {
+    newWorkspace: "New workspace",
+    newWorkspaceDescription: "Start in an empty folder for this session.",
+    remoteSourceUnavailable:
+      "This folder cannot provide a Git checkout. Select New workspace to start empty, or choose a repository.",
+    projectsAdminHint: "Admins can register projects from Browse folders",
+    projectSearchPlaceholder: "Search projects or paste a Git URL",
+    githubTokenHint:
+      "No Control UI GitHub credential or shared Gateway environment token is configured; public GitHub results only.",
+    checkout: "Checkout",
+    checkoutCurrent: "Current checkout",
+    checkoutWorktree: "New worktree",
+    checkoutWorktreeSub: "Isolated copy of the repo",
+    checkoutWorktreeFrom: "New worktree from {branch}",
+    checkoutRepository: "Remote checkout",
+    checkoutRepositoryFrom: "Remote checkout from {branch}",
+    checkoutRemoteLocked: "Devices and cloud run in a worktree",
+    worktreeBaseRef: "From",
+    worktreeBranchesLimited: "Suggestions are limited. Enter any branch or commit.",
+    worktreeBranchesUnavailable: "Branch suggestions are unavailable. Enter a branch or commit.",
+    worktreeName: "Name",
+    worktreeNamePlaceholder: "Named from the session title",
+    worktreeBranchNote: "Creates branch openclaw/<name> in a separate checkout.",
+    placementSyncsFolder: "Syncs {folder} to the selected runner",
+    placementClonesRepository:
+      "Clones {folder} on the selected runner. No Gateway checkout is created.",
     environmentSearchPlaceholder: "Search environments",
     environmentSearchEmpty: "No matching environments",
     gatewayHost: "Gateway host",
