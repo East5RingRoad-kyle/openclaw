@@ -11,6 +11,9 @@ export function resolveQaEvidenceContainment(
     entries.map((entry) => [entry.binding.occurrenceId, entry.effective]),
   );
   for (const owner of occurrences) {
+    if (owner.childCoverage !== undefined && !owner.childOccurrenceIds) {
+      throw new Error("child coverage requires captured bundle membership");
+    }
     if (!owner.childOccurrenceIds) {
       continue;
     }
@@ -73,8 +76,30 @@ export function resolveQaEvidenceContainment(
     }
     return true;
   }
+  function projectCoverage(id: string, claims: QaEvidenceSummaryV3Entry["coverage"]) {
+    let coverage = claims;
+    let parent = parentById.get(id);
+    while (parent) {
+      const cap = byId.get(parent)!.childCoverage;
+      if (cap !== undefined) {
+        const allowed = new Set(cap.map((claim) => claim.id));
+        const primary = new Set(
+          cap.filter((claim) => claim.role === "primary").map((claim) => claim.id),
+        );
+        coverage = coverage
+          .filter((claim) => allowed.has(claim.id))
+          .map((claim) =>
+            claim.role === "primary" && !primary.has(claim.id)
+              ? { id: claim.id, role: "secondary" }
+              : claim,
+          );
+      }
+      parent = parentById.get(parent);
+    }
+    return coverage;
+  }
   const rootInstances = occurrences.filter(
     (occurrence) => occurrence.scenario?.kind === "instance" && !parentById.has(occurrence.id),
   );
-  return { parentById, rootId, isActive, rootInstances };
+  return { parentById, rootId, isActive, projectCoverage, rootInstances };
 }

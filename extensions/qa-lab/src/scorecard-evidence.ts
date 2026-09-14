@@ -1,6 +1,7 @@
 // QA Lab plugin module embeds profile scorecard context into QA evidence.
 import fs from "node:fs/promises";
 import { normalizeSortedUniqueTrimmedStringList } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import {
   attachQaEvidenceScorecard,
   getEffectiveQaEvidenceEntries,
@@ -87,7 +88,20 @@ function buildQaProfileScorecardEvidence(params: {
   filters: QaProfileScorecardFilters;
   categories: readonly QaScorecardCategoryCoverageReport[];
 }): QaEvidenceScorecardJson {
-  const entries = getEffectiveQaEvidenceEntries(params.evidence);
+  const containment =
+    params.evidence.schemaVersion === 3
+      ? resolveQaEvidenceContainment(params.evidence.occurrences, params.evidence.entries)
+      : undefined;
+  // Coverage is a qualifying projection; raw rows keep their captured roles and
+  // object identity for history, binding validation and gallery selection.
+  const entries = getEffectiveQaEvidenceEntries(params.evidence).map((entry) =>
+    containment && "binding" in entry
+      ? {
+          ...entry,
+          coverage: containment.projectCoverage(entry.binding.occurrenceId, entry.coverage),
+        }
+      : entry,
+  );
   // Only passing primary evidence fulfills coverage; secondary evidence remains diagnostic.
   const passingEntries = entries.filter((entry) => entry.result.status === "pass");
   const primaryCoverageIds = coverageIdsForRole(passingEntries, "primary");

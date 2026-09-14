@@ -289,6 +289,88 @@ it.each([
 
 describe("qa test file scenario runner", () => {
   it.each([
+    { firstFails: false, lastId: "same" },
+    { firstFails: true, lastId: "same" },
+    { firstFails: true, lastId: "different" },
+  ])(
+    "executes repeated Docker lanes independently ($firstFails, $lastId)",
+    async ({ firstFails, lastId }) => {
+      const repoRoot = await makeTempRepo("qa-docker-repeated-lanes-");
+      const repeated = makeDockerE2eScenario("same", "gateway-network");
+      const scenarios = [
+        repeated,
+        makeDockerE2eScenario("other", "openai-chat-tools"),
+        makeDockerE2eScenario(lastId, "gateway-network"),
+      ];
+      const prepareCommand = vi.fn((command: QaScenarioCommandExecution) =>
+        writeDockerCandidateManifest(command, {
+          schema: "openclaw.qa-docker-candidate/v1",
+          schemaVersion: 1,
+          sourceSha: "a".repeat(40),
+          candidate: null,
+        }),
+      );
+      const env = await prepareDockerE2eEnvironment({
+        env: {},
+        repoRoot,
+        outputDir: path.join(repoRoot, "prep"),
+        scenarios,
+        runCommand: prepareCommand,
+      });
+      const commands: QaScenarioCommandExecution[] = [];
+      const result = await runQaTestFileScenarios({
+        repoRoot,
+        outputDir: path.join(repoRoot, "out"),
+        ...QA_TEST_RUNNER_DEFAULTS,
+        env,
+        envMode: "replace",
+        scenarios,
+        runCommand: async (command) => {
+          commands.push(command);
+          const failed = commands.length === (firstFails ? 1 : 2);
+          const names = command.env.OPENCLAW_DOCKER_ALL_LANES!.split(",");
+          const lanes = names.map((name) => ({
+            name,
+            elapsedSeconds: 1,
+            status: failed ? 1 : 0,
+          }));
+          await fs.writeFile(
+            path.join(command.env.OPENCLAW_DOCKER_ALL_LOG_DIR!, "summary.json"),
+            JSON.stringify({
+              selectedLanes: names,
+              lanes,
+              failures: lanes.filter((lane) => lane.status !== 0),
+            }),
+          );
+          return {
+            exitCode: failed ? 1 : 0,
+            stdout: `actual batch ${commands.length}`,
+            stderr: "",
+          };
+        },
+      });
+      expect(prepareCommand).toHaveBeenCalledTimes(1);
+      expect(prepareCommand.mock.calls[0]![0].env.OPENCLAW_DOCKER_ALL_LANES).toBe(
+        "gateway-network,openai-chat-tools",
+      );
+      expect(commands.map((command) => command.env.OPENCLAW_DOCKER_ALL_LANES)).toEqual([
+        "gateway-network,openai-chat-tools",
+        "gateway-network",
+      ]);
+      expect(result.results.map((entry) => [entry.scenario.id, entry.status])).toEqual([
+        ["same", firstFails ? "fail" : "pass"],
+        ["other", firstFails ? "fail" : "pass"],
+        [lastId, firstFails ? "pass" : "fail"],
+      ]);
+      const [first, , last] = result.results;
+      expect(last!.logPath).not.toBe(first!.logPath);
+      expect(await fs.readFile(first!.logPath, "utf8")).toContain("actual batch 1");
+      expect(await fs.readFile(last!.logPath, "utf8")).toContain("actual batch 2");
+      expect(new Set(result.results.map((entry) => entry.evidenceOccurrenceId)).size).toBe(3);
+    },
+  );
+
+  it.each([
     { label: "package", candidate: "package" as const },
     { label: "package-free", candidate: "none" as const },
   ])("keeps hostile inherited Docker state out of a prepared $label run", async ({ candidate }) => {
@@ -388,6 +470,11 @@ describe("qa test file scenario runner", () => {
       { ...dockerScenario, execution: { ...dockerScenario.execution, timeoutMs: 3_000 } },
       makeScriptScenario("long-script-a", 3_000),
       makeScriptScenario("long-script-b", 3_000),
+      {
+        ...dockerScenario,
+        id: "short-docker",
+        execution: { ...dockerScenario.execution, timeoutMs: 1_000 },
+      },
     ];
     const executionOrder: string[] = [];
     const output: string[] = [];
@@ -404,7 +491,10 @@ describe("qa test file scenario runner", () => {
       progress: (message) => progress.push(message),
       runCommand: async (command) => {
         const isDocker = command.args[0] === "scripts/test-docker-all.mjs";
-        let scenarioId = "long-docker";
+        let scenarioId =
+          command.env.OPENCLAW_DOCKER_ALL_LANE_TIMEOUT_MS === "3000"
+            ? "long-docker"
+            : "short-docker";
         if (!isDocker) {
           const scriptPath = command.args[2];
           if (!scriptPath) {
@@ -451,6 +541,7 @@ describe("qa test file scenario runner", () => {
       "long-script-a",
       "long-script-b",
       "short-script",
+      "short-docker",
     ]);
     expect(maximumActiveCommands).toBe(1);
     expect(output).toEqual(executionOrder.map((scenarioId) => `stdout:${scenarioId}`));
@@ -459,6 +550,7 @@ describe("qa test file scenario runner", () => {
       "native script start scenario=long-script-a timeoutMs=3000",
       "native script start scenario=long-script-b timeoutMs=3000",
       "native script start scenario=short-script timeoutMs=1000",
+      "native docker-batch start scenarios=1 timeoutMs=1000",
     ]);
     const catalogOrder = scenarios.map((scenario) => scenario.id);
     expect(result.results.map((entry) => entry.scenario.id)).toEqual(catalogOrder);

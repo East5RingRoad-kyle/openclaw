@@ -287,6 +287,24 @@ process.exitCode = Number(value("--exit"));
         expect(active.slice(0, -1).map((entry) => entry.coverage)).toEqual(
           Array.from({ length: status === "pass" ? 3 : 2 }, () => [
             { id: "qa.coverage", role: "primary" },
+            { id: "qa.reporting", role: "primary" },
+            { id: "other.claim", role: "primary" },
+          ]),
+        );
+        if (projected.schemaVersion !== 3) {
+          throw new Error("expected occurrence evidence");
+        }
+        const containment = resolveQaEvidenceContainment(projected.occurrences, projected.entries);
+        expect(
+          active.slice(0, -1).map((entry) => {
+            if (!("binding" in entry)) {
+              throw new Error("expected bound child row");
+            }
+            return containment.projectCoverage(entry.binding.occurrenceId, entry.coverage);
+          }),
+        ).toEqual(
+          Array.from({ length: status === "pass" ? 3 : 2 }, () => [
+            { id: "qa.coverage", role: "primary" },
             { id: "qa.reporting", role: "secondary" },
           ]),
         );

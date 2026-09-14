@@ -5,17 +5,17 @@ import path from "node:path";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, expect, it } from "vitest";
 import {
-  modelCellPrefix,
-  runCodeModeModelMatrix,
-  type CodeModeMatrixCellResult,
-} from "../../../scripts/code-mode-model-matrix.js";
-import { createGatewayMatrixWorkload } from "../../../scripts/lib/code-mode-matrix-gateway.js";
-import { createNestedGitEnv } from "../../../test/helpers/temp-repo.js";
-import {
   getEffectiveQaEvidenceEntries,
   projectQaEvidenceScenarioOutcomes,
   validateQaEvidenceSummaryJson,
-} from "../api.js";
+} from "../../extensions/qa-lab/api.js";
+import {
+  modelCellPrefix,
+  runCodeModeModelMatrix,
+  type CodeModeMatrixCellResult,
+} from "../../scripts/code-mode-model-matrix.js";
+import { createGatewayMatrixWorkload } from "../../scripts/lib/code-mode-matrix-gateway.js";
+import { createNestedGitEnv } from "../helpers/temp-repo.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 

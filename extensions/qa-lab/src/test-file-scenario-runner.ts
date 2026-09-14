@@ -35,6 +35,7 @@ import {
   dockerLaneName,
   isDockerE2eScenario,
   runDockerE2eBatch,
+  splitDockerE2eScenarioBatches,
   type QaPreparedDockerEvidence,
 } from "./test-file-scenario-docker-batch.js";
 import {
@@ -328,12 +329,14 @@ function buildExecutionUnits(params: {
   }
   const batchedScenarios = new Set<QaTestFileScenario>(dockerBatchScenarios);
   const units: QaTestFileExecutionUnit[] = [
-    ...[...dockerBatchGroups].map(([timeoutMs, scenarios]) => ({
-      kind: "docker-batch" as const,
-      order: Math.min(...scenarios.map((scenario) => scenarioOrder.get(scenario) ?? 0)),
-      scenarios,
-      timeoutMs,
-    })),
+    ...[...dockerBatchGroups].flatMap(([timeoutMs, scenarios]) =>
+      splitDockerE2eScenarioBatches(scenarios).map((batch) => ({
+        kind: "docker-batch" as const,
+        order: Math.min(...batch.map((scenario) => scenarioOrder.get(scenario) ?? 0)),
+        scenarios: batch,
+        timeoutMs,
+      })),
+    ),
     ...params.scenarios
       .filter((scenario) => !batchedScenarios.has(scenario))
       .map((scenario) => ({
@@ -537,12 +540,10 @@ export async function runQaTestFileScenarios(
       producer?.schemaVersion === 3 ||
       (producer?.entries.length && result.includeFallbackEvidence)
     ) {
+      const commandEntries = commandRows();
       let childEvidence: QaEvidenceSummaryV3Json;
       if (producer.schemaVersion === 3) {
-        childEvidence = {
-          ...producer,
-          entries: producer.entries.map((entry) => withScenarioCoverage(entry, result.scenario)),
-        };
+        childEvidence = producer;
       } else {
         // A v2 reporter has no recorded schedule. Bind its rows only to this
         // actual read, retaining a distinct producer observation without inventing history.
@@ -574,8 +575,11 @@ export async function runQaTestFileScenarios(
       invocation.complete(id, {
         status: result.status,
         childEvidence,
+        ...(producer.schemaVersion === 3 && producer.occurrences.length > 0
+          ? { childCoverage: commandEntries[0]!.coverage }
+          : {}),
         receipts,
-        entries: commandRows().map((entry) => Object.assign({}, entry, { coverage: [] })),
+        entries: commandEntries.map((entry) => Object.assign({}, entry, { coverage: [] })),
       });
     } else {
       const hasProducerEntries = (producer?.entries.length ?? 0) > 0;

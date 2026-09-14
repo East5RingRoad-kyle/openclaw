@@ -227,6 +227,25 @@ function laneMatches(
   );
 }
 
+export function splitDockerE2eScenarioBatches(scenarios: readonly QaDockerScenario[]) {
+  const batches: QaDockerScenario[][] = [];
+  const lanes = new Set<string>();
+  for (const scenario of scenarios) {
+    const lane = dockerE2eLaneName(scenario)!;
+    if (lanes.has(lane)) {
+      lanes.clear();
+    }
+    // The downstream scheduler executes a set of lane names. A repeated request
+    // therefore needs another command and its own immutable attempt directory.
+    if (lanes.size === 0) {
+      batches.push([]);
+    }
+    batches.at(-1)!.push(scenario);
+    lanes.add(lane);
+  }
+  return batches;
+}
+
 export async function runDockerE2eBatch(params: {
   commandTimeoutMs: number;
   env: NodeJS.ProcessEnv;
@@ -240,7 +259,10 @@ export async function runDockerE2eBatch(params: {
     lane: dockerE2eLaneName(scenario)!,
     scenario,
   }));
-  const laneNames = [...new Set(selected.map(({ lane }) => lane))];
+  const laneNames = selected.map(({ lane }) => lane);
+  if (new Set(laneNames).size !== laneNames.length) {
+    throw new Error("repeated Docker lanes require separate execution batches");
+  }
   const batchId = `${params.commandTimeoutMs}ms`;
   const dockerOutputDir = path.join(params.outputDir, `docker-e2e-${batchId}`);
   const logPath = path.join(params.outputDir, `docker-e2e-batch-${batchId}.log`);

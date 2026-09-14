@@ -536,16 +536,18 @@ describe("qa suite runtime launcher", () => {
       if (evidence.schemaVersion !== 3) {
         throw new Error("expected aggregate v3");
       }
-      expect(capturedChildren).toHaveLength(2);
+      expect(capturedChildren).toHaveLength(failFast ? 1 : 2);
       const outcomes = projectQaEvidenceScenarioOutcomes(evidence);
       expect(outcomes.map((item) => item.scenarioId)).toEqual([
         script.id,
         nativeScenario.id,
         script.id,
       ]);
-      expect(outcomes.map((item) => item.status)).toEqual(["pass", "pass", "pass"]);
+      expect(outcomes.map((item) => item.status)).toEqual(
+        failFast ? ["blocked", "pass", null] : ["blocked", "pass", "blocked"],
+      );
       expect(result.result.scenarios.map((item) => item.evidenceOccurrenceId)).toEqual(
-        outcomes.map((item) => item.occurrenceId),
+        outcomes.filter((item) => item.occurrenceId !== null).map((item) => item.occurrenceId),
       );
       for (const child of capturedChildren) {
         expect(projectQaEvidenceScenarioOutcomes(child).map((item) => item.status)).toEqual([

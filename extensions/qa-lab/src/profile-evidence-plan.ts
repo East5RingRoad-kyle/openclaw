@@ -272,17 +272,22 @@ function evaluateProof(
           continue;
         }
         const declarations = occurrence.assertions?.filter((assertion) =>
-          assertion.coverage.some(
-            (coverage) => coverage.id === requirement.coverageId && coverage.role === "primary",
-          ),
+          containment
+            .projectCoverage(occurrence.id, assertion.coverage)
+            .some(
+              (coverage) => coverage.id === requirement.coverageId && coverage.role === "primary",
+            ),
         );
         for (const assertion of declarations ?? []) {
           const bound = rows.filter(
             (entry) =>
               entry.binding.assertionId === assertion.id &&
-              entry.coverage.some(
-                (coverage) => coverage.id === requirement.coverageId && coverage.role === "primary",
-              ),
+              containment
+                .projectCoverage(occurrence.id, entry.coverage)
+                .some(
+                  (coverage) =>
+                    coverage.id === requirement.coverageId && coverage.role === "primary",
+                ),
           );
           let status: QaProofCheckStatus = "qualified";
           if (bound.length === 0 || occurrence.terminalStatus === null) {

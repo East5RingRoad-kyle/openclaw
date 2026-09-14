@@ -1,5 +1,5 @@
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQaBusState } from "./bus-state.js";
 import {
   projectQaEvidenceScenarioOutcomes,
@@ -122,6 +122,10 @@ vi.mock("./suite-runtime-gateway.js", () => ({
 vi.mock("./web-runtime.js", () => ({
   closeQaWebSessions: vi.fn(async () => {}),
 }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 afterEach(async () => {
   vi.restoreAllMocks();

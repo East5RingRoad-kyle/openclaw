@@ -172,6 +172,7 @@ export function createQaEvidenceInvocation(params: {
       entries: readonly QaEvidenceSummaryEntry[];
       receipts?: QaEvidenceOccurrence["receipts"];
       childEvidence?: QaEvidenceSummaryV3Json;
+      childCoverage?: QaEvidenceOccurrence["childCoverage"];
     },
   ) {
     const occurrence = observationFor(occurrenceId);
@@ -211,6 +212,9 @@ export function createQaEvidenceInvocation(params: {
       ...occurrence,
       terminalStatus: result.status,
       receipts: structuredClone(result.receipts ?? []),
+      ...(result.childCoverage !== undefined
+        ? { childCoverage: structuredClone(result.childCoverage) }
+        : {}),
       ...(childOccurrences.length
         ? {
             childOccurrenceIds: childOccurrences
@@ -359,6 +363,7 @@ export function createQaEvidenceInvocation(params: {
       terminalStatus: _status,
       receipts: _receipts,
       childOccurrenceIds: _children,
+      childCoverage: _coverage,
       ...identity
     }: QaEvidenceOccurrence) => identity;
     for (const occurrence of incoming) {

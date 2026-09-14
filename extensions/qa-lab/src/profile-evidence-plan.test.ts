@@ -148,6 +148,78 @@ describe("QA profile evidence plan", () => {
   }
 
   it.each(["full", "slim"] as const)(
+    "applies captured coverage caps to both retry policies in %s evidence",
+    (evidenceMode) => {
+      for (const caseName of ["primary", "secondary", "rowless"] as const) {
+        const role = caseName === "secondary" ? "secondary" : "primary";
+        const parent = createQaEvidenceInvocation({
+          scenarios: [portable],
+          channel: "slack",
+          launch: proofIdentity,
+        });
+        const first = proofEvidence([{ status: "fail" }], evidenceMode);
+        const second = proofEvidence(
+          caseName === "rowless" ? [] : [{ status: "pass" }],
+          evidenceMode,
+        );
+        for (const [index, childEvidence] of [first, second].entries()) {
+          const status = index === 0 ? "fail" : "pass";
+          const id = parent.begin(0);
+          parent.complete(id, {
+            status,
+            childEvidence,
+            childCoverage: [{ id: "channels.dm", role: index === 0 ? "primary" : role }],
+            entries: [
+              {
+                test: { id: portable.id, kind: "script", title: "enclosing attempt" },
+                coverage: [],
+                result: { status },
+              },
+            ],
+            receipts: [
+              {
+                id: `${id}:bundle`,
+                phase: "prepared",
+                identity: proofIdentity,
+                artifact: {
+                  kind: "producer-evidence",
+                  source: "script",
+                  path: `${id}/qa-evidence.json`,
+                  sha256: "a".repeat(64),
+                },
+              },
+            ],
+          });
+          parent.select(0, id);
+        }
+        const evidence = parent.snapshot({ generatedAt: "2026-09-14T00:00:00Z", evidenceMode });
+        const original = JSON.stringify(evidence);
+        for (const retryAcceptance of ["selected-attempt", "all-recorded-attempts"] as const) {
+          const plan = proofPlan();
+          plan.proofRequirements = plan.proofRequirements.map((item) => ({
+            ...item,
+            retryAcceptance,
+          }));
+          const [proof] = qaProfileEvidencePlan.evaluateProof(plan, evidence);
+          expect(proof!.qualified).toBe(
+            caseName === "primary" && retryAcceptance === "selected-attempt",
+          );
+          if (retryAcceptance === "all-recorded-attempts") {
+            expect(proof!.checks.some((check) => check.status === "failed")).toBe(true);
+          }
+          if (caseName === "rowless") {
+            expect(proof!.checks.some((check) => check.status === "incomplete")).toBe(true);
+          }
+        }
+        expect(JSON.stringify(evidence)).toBe(original);
+        expect(qaProfileEvidencePlan.evaluateProof(proofPlan(), second)[0]!.qualified).toBe(
+          caseName !== "rowless",
+        );
+      }
+    },
+  );
+
+  it.each(["full", "slim"] as const)(
     "keeps synthetic observations out of child assertion obligations in %s evidence",
     (evidenceMode) => {
       const { owner, complete } = proofInvocation();

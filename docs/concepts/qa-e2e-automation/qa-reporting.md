@@ -52,6 +52,10 @@ Native script attempts retain child bundles with their original instance IDs,
 selection pointers, and a receipt for the exact producer file. Top-level outcomes
 describe the outer scheduled scenarios; nested instances remain inspectable child
 detail. A child bundle run on its own still reports its own scheduled outcomes.
+The enclosing attempt records its catalog coverage cap separately. Scorecards and
+explicit proof checks intersect every enclosing cap without changing child rows
+or assertions. Secondary claims never become primary; an empty cap qualifies no
+child claims. Historical bundles without a cap retain their original behavior.
 
 Retries retain the original observations and artifacts. The selected attempt
 controls effective report counts and coverage, while the gallery keeps retained

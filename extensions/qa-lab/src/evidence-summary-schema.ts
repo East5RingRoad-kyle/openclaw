@@ -219,6 +219,8 @@ const qaEvidenceOccurrenceSchema = z.strictObject({
   launch: qaEvidenceIdentitySchema,
   // Direct members of a retained producer bundle; nested ownership stays local.
   childOccurrenceIds: z.array(nonEmptyStringSchema).min(1).optional(),
+  // The enclosing catalog caps qualifying claims without rewriting captured rows.
+  childCoverage: z.array(qaEvidenceCoverageSchema).optional(),
   // Reporter metadata cannot stand in for a prepared or target-observed identity.
   receipts: z.array(
     z.strictObject({

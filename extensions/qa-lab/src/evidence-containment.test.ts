@@ -6,6 +6,7 @@ import {
   projectQaEvidenceScenarioOutcomes,
   validateQaEvidenceSummaryJson,
   type QaEvidenceIdentity,
+  type QaEvidenceOccurrence,
   type QaEvidenceStatus,
   type QaEvidenceSummaryEntry,
 } from "./evidence-summary.js";
@@ -72,6 +73,112 @@ function finish(
 }
 
 describe("retained child evidence ownership", () => {
+  it.each(["full", "slim"] as const)(
+    "intersects nested coverage caps without promoting or rewriting %s child claims",
+    (evidenceMode) => {
+      const child = bundle("pass");
+      child.entries[0]!.coverage = [
+        { id: "qa.coverage", role: "primary" },
+        { id: "qa.reporting", role: "secondary" },
+        { id: "qa.diagnostic", role: "diagnostic" },
+        { id: "other.claim", role: "primary" },
+      ];
+      const original = structuredClone(child);
+      function capture(input: typeof child, childCoverage?: QaEvidenceOccurrence["childCoverage"]) {
+        const parent = owner();
+        const id = parent.begin(0);
+        parent.complete(id, {
+          status: "pass",
+          entries: [row("pass")],
+          childEvidence: input,
+          childCoverage,
+          receipts: [receipt(id)],
+        });
+        parent.select(0, id);
+        return parent.snapshot({ ...options, evidenceMode });
+      }
+      const inner = capture(child, [
+        { id: "qa.coverage", role: "secondary" },
+        { id: "qa.reporting", role: "primary" },
+        { id: "qa.diagnostic", role: "primary" },
+      ]);
+      const summary = capture(inner, [
+        { id: "qa.coverage", role: "primary" },
+        { id: "qa.reporting", role: "primary" },
+        { id: "qa.diagnostic", role: "primary" },
+        { id: "other.claim", role: "primary" },
+      ]);
+      const entry = summary.entries[0]!;
+      const containment = resolveQaEvidenceContainment(summary.occurrences, summary.entries);
+      expect(containment.projectCoverage(entry.binding.occurrenceId, entry.coverage)).toEqual([
+        { id: "qa.coverage", role: "secondary" },
+        { id: "qa.reporting", role: "secondary" },
+        { id: "qa.diagnostic", role: "diagnostic" },
+      ]);
+      expect(entry).toEqual(original.entries[0]);
+      expect(getEffectiveQaEvidenceEntries(summary)[0]).toBe(entry);
+      const empty = capture(child, []);
+      expect(
+        resolveQaEvidenceContainment(empty.occurrences, empty.entries).projectCoverage(
+          entry.binding.occurrenceId,
+          entry.coverage,
+        ),
+      ).toEqual([]);
+      const historical = capture(child);
+      expect(
+        resolveQaEvidenceContainment(historical.occurrences, historical.entries).projectCoverage(
+          entry.binding.occurrenceId,
+          entry.coverage,
+        ),
+      ).toBe(entry.coverage);
+      expect(
+        resolveQaEvidenceContainment(child.occurrences, child.entries).projectCoverage(
+          entry.binding.occurrenceId,
+          entry.coverage,
+        ),
+      ).toBe(entry.coverage);
+      expect(child).toEqual(original);
+    },
+  );
+
+  it("admits a coverage cap once with open completion and rejects later rewrites atomically", () => {
+    const parent = owner();
+    const shared = createQaEvidenceInvocation({
+      scenarios: [scenario],
+      channel: null,
+      launch,
+      anchors: parent.anchors,
+    });
+    const id = shared.begin(0);
+    parent.importChild(0, shared.snapshot(options));
+    parent.select(0, null);
+    const open = parent.snapshot(options);
+    expect(() =>
+      parent.complete(id, {
+        status: "pass",
+        entries: [row("pass")],
+        childCoverage: [],
+      }),
+    ).toThrow(/membership/);
+    expect(parent.snapshot(options)).toEqual(open);
+    shared.complete(id, {
+      status: "pass",
+      entries: [row("pass")],
+      childEvidence: bundle("pass"),
+      childCoverage: [{ id: "qa.coverage", role: "secondary" }],
+      receipts: [receipt(id)],
+    });
+    shared.select(0, id);
+    parent.importChild(0, shared.snapshot(options));
+    parent.select(0, id);
+    const completed = parent.snapshot(options);
+    expect(completed).toEqual(shared.snapshot(options));
+    const changed = structuredClone(completed);
+    changed.occurrences.find((item) => item.id === id)!.childCoverage = [];
+    expect(() => parent.importChild(0, changed)).toThrow(/completed or immutable/);
+    expect(parent.snapshot(options)).toEqual(completed);
+  });
+
   it.each(["full", "slim"] as const)(
     "preserves %s child identities, unresolved schedule and local pointers behind one outer result",
     (evidenceMode) => {
