@@ -1,5 +1,5 @@
 import { expectDefined } from "@openclaw/normalization-core";
-import { html, nothing, render } from "lit";
+import { nothing, render } from "lit";
 import { vi } from "vitest";
 import { resetChatThreadState } from "../chat-thread.ts";
 import { createTestTranscript } from "../chat-view.test-helpers.ts";
@@ -119,14 +119,6 @@ export function stubMcpAppLifecycle(
     teardown: vi.fn(teardown),
   };
   return { app: Object.assign(app, lifecycle), ...lifecycle };
-}
-
-export function mcpRangeRows(appContent: unknown): TestContentRow[] {
-  return Array.from({ length: 24 }, (_, index) => ({
-    kind: "content" as const,
-    key: `row:${index}`,
-    content: index === 17 ? appContent : html`<div>row ${index}</div>`,
-  }));
 }
 
 export async function flushDeferredRowPrune(): Promise<void> {

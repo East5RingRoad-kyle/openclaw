@@ -17,7 +17,6 @@ import { ChatTranscriptController } from "./chat-transcript-controller.ts";
 import {
   flushDeferredRowPrune,
   installTranscriptDomMocks,
-  mcpRangeRows,
   mountTestTranscript,
   observedElements,
   resetTranscriptTestDom,
@@ -29,6 +28,14 @@ import {
   transcriptRows,
   transcriptSize,
 } from "./chat-transcript.test-support.ts";
+
+function mcpRangeRows(appContent: unknown): TestContentRow[] {
+  return Array.from({ length: 24 }, (_, index) => ({
+    kind: "content" as const,
+    key: `row:${index}`,
+    content: index === 17 ? appContent : html`<div>row ${index}</div>`,
+  }));
+}
 
 describe("chat transcript controller", () => {
   beforeEach(installTranscriptDomMocks);
