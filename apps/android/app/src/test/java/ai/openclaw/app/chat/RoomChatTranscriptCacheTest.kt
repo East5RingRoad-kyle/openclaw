@@ -1,6 +1,9 @@
 package ai.openclaw.app.chat
 
+import ai.openclaw.app.ui.chat.ChatTimelineItem
+import ai.openclaw.app.ui.chat.buildChatTimeline
 import ai.openclaw.app.ui.chat.latestChatMessageUsage
+import ai.openclaw.app.ui.chat.withCompletedWorkGroups
 import androidx.room3.Room
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +41,43 @@ class RoomChatTranscriptCacheTest {
         }.asCoroutineDispatcher(),
       ).build()
   private val store = RoomChatTranscriptCache(database = database)
+
+  @Test
+  fun completedWorkKeepsExplicitAnswersAndUnresolvedErrorsAfterOfflineReload() =
+    runTest {
+      val controller =
+        createChatController { method, _ ->
+          if (method == "chat.history") {
+            """{"messages":[
+            {"role":"user","content":"Check the draft","timestamp":1000},
+            {"role":"assistant","content":"Checking","phase":"commentary","timestamp":2000},
+            {"role":"assistant","content":[{"type":"text","text":"Draft is ready","textSignature":"{\"v\":1,\"phase\":\"final_answer\"}"}],"timestamp":3000},
+            {"role":"assistant","content":"Finishing notes","phase":"commentary","timestamp":4000},
+            {"role":"assistant","content":"The follow-up failed","stopReason":"error","timestamp":5000}
+          ]}"""
+          } else {
+            emptyChatGatewayResponse(method)
+          }
+        }
+      controller.load("agent:main:dashboard:test")
+      advanceUntilIdle()
+      val live = controller.messages.value
+      saveTranscript(live)
+      for (history in listOf(live, loadTranscript())) {
+        val timeline =
+          buildChatTimeline(history, 0, emptyList(), null)
+            .withCompletedWorkGroups(history, false, emptySet(), "agent:main:dashboard:test", "agent:main:main")
+        assertEquals(
+          listOf("The follow-up failed", "Draft is ready", "Check the draft"),
+          timeline.items.filterIsInstance<ChatTimelineItem.Message>().map {
+            it.message.content
+              .first()
+              .text
+          },
+        )
+        assertEquals(1, timeline.items.filterIsInstance<ChatTimelineItem.WorkedSummary>().size)
+      }
+    }
 
   @After
   fun tearDown() {

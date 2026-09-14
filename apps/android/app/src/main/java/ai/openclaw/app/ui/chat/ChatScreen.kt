@@ -958,6 +958,7 @@ internal fun ChatScreen(
   }
   ChatMessageList(
     sessionKey = sessionKey,
+    mainSessionKey = mainSessionKey,
     fullMessageOwner = composerOwner,
     selectionGeneration = selectionGeneration,
     gatewayCatalogRevision = gatewayCatalogRevision,
@@ -1607,6 +1608,7 @@ private fun HeaderIcon(
 @Composable
 private fun ChatMessageList(
   sessionKey: String,
+  mainSessionKey: String,
   fullMessageOwner: ChatComposerOwner,
   selectionGeneration: Long,
   gatewayCatalogRevision: Long,
@@ -1689,8 +1691,8 @@ private fun ChatMessageList(
     )
   var expandedWorkKeys by remember(sessionKey) { mutableStateOf(emptySet<String>()) }
   val timeline =
-    remember(baseTimeline, turnRecap, expandedWorkKeys, activeRunCount, sessionKey) {
-      baseTimeline.withCompletedWorkGroups(messages, activeRunCount > 0, expandedWorkKeys, sessionKey).withTurnRecap(turnRecap)
+    remember(baseTimeline, turnRecap, expandedWorkKeys, activeRunCount, activeRunId, sessionKey, mainSessionKey) {
+      baseTimeline.withCompletedWorkGroups(messages, activeRunCount > 0, expandedWorkKeys, sessionKey, mainSessionKey, activeRunId).withTurnRecap(turnRecap)
     }
   val readerScroll =
     rememberChatReaderScrollController(

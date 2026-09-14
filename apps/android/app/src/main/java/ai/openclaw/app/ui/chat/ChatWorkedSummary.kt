@@ -24,21 +24,21 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 
-// Match web assistantGroupIsForwardedBoundary: attribution labels do not establish turn ownership.
-
-/** Mirror web collapseCompletedTurnWork: only the contiguous work preceding a final reply folds. */
+/** Fold completed output around its answers without changing the canonical transcript. */
 internal fun ChatTimeline.withCompletedWorkGroups(
   messages: List<ChatMessage>,
   runWorking: Boolean,
   expandedKeys: Set<String>,
   sessionKey: String,
+  mainSessionKey: String,
+  activeRunId: String? = null,
 ): ChatTimeline {
-  val sessionParts = sessionKey.trim().lowercase().split(':')
-  if (sessionParts.size != 4 || sessionParts[0] != "agent" || sessionParts[1].isBlank() ||
-    sessionParts[2] != "dashboard" || sessionParts[3].isBlank()
-  ) {
-    return this
-  }
+  val key = sessionKey.trim().lowercase()
+  val sessionParts = key.split(':')
+  val agentSession = sessionParts.size >= 3 && sessionParts[0] == "agent" && sessionParts[1].isNotBlank()
+  val main = key == "main" || key == mainSessionKey.trim().lowercase() || (agentSession && sessionParts.size == 3 && sessionParts[2] == "main")
+  val dashboard = agentSession && sessionParts.size == 4 && sessionParts[2] == "dashboard" && sessionParts[3].isNotBlank()
+  if (!main && !dashboard) return this
   val chronological = items.asReversed()
   val turns = mutableListOf<MutableList<ChatTimelineItem>>()
   chronological.forEach { item ->
@@ -55,6 +55,10 @@ internal fun ChatTimeline.withCompletedWorkGroups(
           item.turnBoundary
         }
 
+        is ChatTimelineItem.SystemDivider, is ChatTimelineItem.SystemNotice -> {
+          true
+        }
+
         else -> {
           false
         }
@@ -62,16 +66,17 @@ internal fun ChatTimeline.withCompletedWorkGroups(
     if (turns.isEmpty() || startsTurn) turns.add(mutableListOf())
     turns.last().add(item)
   }
-  val timestamps = messages.associate { (it.entryId ?: it.idempotencyKey ?: it.id) to it.timestampMs }
+  val sourceMessages = messages.associateBy { it.entryId ?: it.idempotencyKey ?: it.id }
+  val sourcePositions = messages.withIndex().associate { it.value.id to it.index }
 
-  fun timestamp(item: ChatTimelineItem): Long? =
+  fun source(item: ChatTimelineItem): ChatMessage? =
     when (item) {
-      is ChatTimelineItem.Message -> item.message.timestampMs
-      is ChatTimelineItem.CompletedTools -> timestamps[item.key]
+      is ChatTimelineItem.Message -> item.message
+      is ChatTimelineItem.CompletedTools -> sourceMessages[item.key]
       else -> null
     }
 
-  fun isWork(item: ChatTimelineItem): Boolean =
+  fun isOutput(item: ChatTimelineItem): Boolean =
     when (item) {
       is ChatTimelineItem.CompletedTools -> {
         true
@@ -80,47 +85,57 @@ internal fun ChatTimeline.withCompletedWorkGroups(
       is ChatTimelineItem.Message -> {
         item.message.role
           .trim()
-          .equals("assistant", ignoreCase = true) &&
-          !item.message.isForwardedBoundary() &&
-          // Tool activity is rendered separately; retain canonical content for full-message reads.
-          item.message.content.all { it.toolActivity != null || it.type == "text" }
+          .equals("assistant", ignoreCase = true) && !item.message.isForwardedBoundary()
       }
 
       else -> {
         false
       }
     }
+
+  fun hasMedia(message: ChatMessage) = message.content.any { it.toolActivity == null && it.type != "text" }
+
+  fun hasReplyContent(message: ChatMessage) = hasMedia(message) || message.content.any { it.type == "text" && !it.text.isNullOrBlank() }
+
+  fun hasUnresolvedWork(item: ChatTimelineItem): Boolean =
+    when (item) {
+      is ChatTimelineItem.CompletedTools -> item.hasUnresolvedTools
+      is ChatTimelineItem.Message -> item.message.isError || item.hasUnresolvedTools
+      else -> false
+    }
+
+  fun isCompletedReply(item: ChatTimelineItem): Boolean = item is ChatTimelineItem.Message && isOutput(item) && hasReplyContent(item.message) && item.message.phase != "commentary" && !hasUnresolvedWork(item)
+
+  fun isWork(item: ChatTimelineItem): Boolean = isOutput(item) && (item !is ChatTimelineItem.Message || (!hasMedia(item.message) && item.message.phase != "final_answer"))
   // Steering messages continue an existing run; they are not completed-turn boundaries.
   val runTurns = mutableMapOf<String, Int>()
-  val steeringTurns = linkedMapOf<String, MutableList<Int>>()
+  val continuations = mutableMapOf<Int, Int>()
+  val preceding = mutableMapOf<Int, Int>()
+  val tails = mutableMapOf<Int, Int>()
   turns.forEachIndexed { index, turn ->
     val user =
       (turn.firstOrNull() as? ChatTimelineItem.Message)?.message?.takeIf {
         it.role.equals("user", ignoreCase = true)
       }
     user?.runId?.let { runTurns.putIfAbsent(it, index) }
-    user?.steerTargetRunId?.let { steeringTurns.getOrPut(it) { mutableListOf() }.add(index) }
-  }
-  val continuations = mutableMapOf<Int, Int>()
-  val preceding = mutableMapOf<Int, Int>()
-  steeringTurns.forEach { (runId, indexes) ->
-    var previous = runTurns[runId] ?: return@forEach
-    indexes.forEach { index ->
-      if (index > previous) {
-        continuations[previous] = index
-        preceding[index] = previous
-        previous = index
-      }
+    var previous = user?.steerTargetRunId?.let(runTurns::get) ?: return@forEachIndexed
+    if (previous >= index) return@forEachIndexed
+    val ancestors = mutableListOf<Int>()
+    while (previous in tails) {
+      ancestors.add(previous)
+      previous = tails.getValue(previous)
     }
+    continuations[previous] = index
+    preceding[index] = previous
+    tails[previous] = index
+    ancestors.forEach { tails[it] = index }
   }
   val finalIndexes =
     turns.mapIndexed { index, turn ->
       if (index in continuations) {
         -1
       } else {
-        turn.indexOfLast {
-          it is ChatTimelineItem.Message && it.message.role.equals("assistant", ignoreCase = true) && !it.message.isForwardedBoundary()
-        }
+        turn.indexOfLast(::isCompletedReply)
       }
     }
   val terminalReplies =
@@ -132,9 +147,11 @@ internal fun ChatTimeline.withCompletedWorkGroups(
     if (terminalReplies[index] == null) continuations[index]?.let { terminalReplies[index] = terminalReplies[it] }
   }
   val liveTurns = mutableSetOf<Int>()
-  if (runWorking) {
-    var index = turns.lastIndex
-    while (index >= 0 && liveTurns.add(index)) index = preceding[index] ?: break
+  turns.forEachIndexed { turnIndex, turn ->
+    if ((runWorking && turnIndex == turns.lastIndex) || (activeRunId != null && turn.any { source(it)?.runId == activeRunId })) {
+      var index = turnIndex
+      while (liveTurns.add(index)) index = preceding[index] ?: break
+    }
   }
   val rendered =
     buildList {
@@ -146,12 +163,48 @@ internal fun ChatTimeline.withCompletedWorkGroups(
             }
         val finalIndex = finalIndexes[turnIndex]
         val terminal = terminalReplies[turnIndex]
-        val end = if (finalIndex >= 0) finalIndex else turn.size
-        var start = end
-        while (start > 0 && isWork(turn[start - 1])) start--
-        if (live || terminal == null || start == end) {
+        if (live || terminal == null) {
           addAll(turn)
         } else {
+          var start = if (finalIndex >= 0) finalIndex else turn.lastIndex
+          var end = start
+          if (!isOutput(turn[start])) {
+            addAll(turn)
+            return@forEachIndexed
+          }
+          while (start > 0 && isOutput(turn[start - 1])) start--
+          val terminalPosition = sourcePositions.getValue(terminal.message.id)
+          val replyPositions =
+            turn
+              .take(if (finalIndex >= 0) finalIndex + 1 else turn.size)
+              .mapNotNull { item ->
+                (item as? ChatTimelineItem.Message)?.takeIf(::isCompletedReply)?.message?.let { message ->
+                  message.runId?.let { it to sourcePositions.getValue(message.id) }
+                }
+              }.toMap()
+              .toMutableMap()
+          terminal.message.runId?.let { replyPositions[it] = terminalPosition }
+          while (end < turn.lastIndex && isOutput(turn[end + 1])) {
+            val runId = source(turn[end + 1])?.runId
+            if (runId != null && runId !in replyPositions) break
+            end++
+          }
+          val work = mutableListOf<ChatTimelineItem>()
+          val answers = mutableListOf<ChatTimelineItem>()
+          for (index in start..end) {
+            val item = turn[index]
+            val message = source(item)
+            val sourcePosition = message?.let { sourcePositions.getValue(it.id) } ?: -1
+            val replyPosition = message?.runId?.let(replyPositions::get) ?: terminalPosition
+            val unresolvedPosition = if (item is ChatTimelineItem.CompletedTools) maxOf(sourcePosition, item.lastFailureMessageIndex) else sourcePosition
+            val unansweredWork = hasUnresolvedWork(item) && unresolvedPosition >= replyPosition
+            val replylessRun = message?.runId?.let { it !in replyPositions } == true
+            if (index != finalIndex && isWork(item) && !unansweredWork && !replylessRun) work.add(item) else answers.add(item)
+          }
+          if (work.isEmpty()) {
+            addAll(turn)
+            return@forEachIndexed
+          }
           val continuationBoundary = continuations[turnIndex]?.let { turns[it].firstOrNull() } as? ChatTimelineItem.Message
           val identity = if (finalIndex >= 0) terminal.message else continuationBoundary?.message ?: terminal.message
           val key = identity.entryId ?: identity.idempotencyKey ?: identity.id
@@ -163,13 +216,14 @@ internal fun ChatTimeline.withCompletedWorkGroups(
                   .trim()
                   .equals("user", ignoreCase = true)
               }?.message
-              ?.timestampMs ?: timestamp(turn[start])
-          val endTime = terminal.message.timestampMs
-          val duration = if (startTime != null && endTime != null && endTime > startTime) endTime - startTime else null
+              ?.timestampMs ?: source(work.first())?.timestampMs
+          val endTime = (work.mapNotNull { source(it)?.timestampMs } + listOfNotNull(terminal.message.timestampMs)).maxOrNull()
+          val duration = if (startTime != null && endTime != null && terminal.message.timestampMs?.let { it > startTime } == true) endTime - startTime else null
           addAll(turn.take(start))
           add(ChatTimelineItem.WorkedSummary(key, duration, key in expandedKeys))
-          if (key in expandedKeys) addAll(turn.subList(start, end))
-          addAll(turn.drop(end))
+          if (key in expandedKeys) addAll(work)
+          addAll(answers)
+          addAll(turn.drop(end + 1))
         }
       }
     }.asReversed()
