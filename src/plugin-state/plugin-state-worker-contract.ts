@@ -1,8 +1,14 @@
 import type { Result } from "@openclaw/normalization-core/result";
 import type { SqliteWorkerCommand } from "../infra/sqlite-worker-contract.js";
+import type {
+  PluginStateComparisonLimits,
+  PluginStatePreparedComparison,
+} from "./plugin-state-store.comparison.js";
 import type { PluginStateRegisterEntryParams } from "./plugin-state-store.kernel.js";
 import type {
+  PluginStateCompareResult,
   PluginStateEntry,
+  PluginStateObservation,
   PluginStateStoreErrorCode,
   PluginStateStoreOperation,
 } from "./plugin-state-store.types.js";
@@ -13,6 +19,18 @@ type Key = Namespace & { key: string };
 type Register = Omit<PluginStateRegisterEntryParams, "createdAtMs"> & { maxPluginEntries: number };
 
 export type PluginStateWorkerOperations = {
+  "pluginState.observe": {
+    input: Key;
+    output: Result<PluginStateObservation<unknown>, PluginStateWorkerFailure>;
+  };
+  "pluginState.compareUpdate": {
+    input: PluginStatePreparedComparison & PluginStateComparisonLimits & { operation: "update" };
+    output: Result<PluginStateCompareResult<unknown>, PluginStateWorkerFailure>;
+  };
+  "pluginState.compareDelete": {
+    input: PluginStatePreparedComparison & PluginStateComparisonLimits & { operation: "delete" };
+    output: Result<PluginStateCompareResult<unknown>, PluginStateWorkerFailure>;
+  };
   "pluginState.register": { input: Register; output: Result<void, PluginStateWorkerFailure> };
   "pluginState.registerIfAbsent": {
     input: Register;
@@ -38,6 +56,21 @@ export type PluginStateWorkerOperations = {
 };
 
 export const pluginStateWorkerOperations = {
+  "pluginState.observe": {
+    operation: "lookup",
+    code: "PLUGIN_STATE_READ_FAILED",
+    message: "Failed to observe plugin state entry.",
+  },
+  "pluginState.compareUpdate": {
+    operation: "register",
+    code: "PLUGIN_STATE_WRITE_FAILED",
+    message: "Failed to update plugin state entry.",
+  },
+  "pluginState.compareDelete": {
+    operation: "delete",
+    code: "PLUGIN_STATE_WRITE_FAILED",
+    message: "Failed to conditionally delete plugin state entry.",
+  },
   "pluginState.register": {
     operation: "register",
     code: "PLUGIN_STATE_WRITE_FAILED",
