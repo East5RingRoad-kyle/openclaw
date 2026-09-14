@@ -382,6 +382,7 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
           markHandshakeFailure,
           sendHandshakeErrorResponse,
           sendFrame,
+          onHelloDelivered: flushQueuedHandshakeFrames,
           isWebchatConnect,
           runDetachedConnectWork,
           pendingNodePairingCleanup,
@@ -610,8 +611,8 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
       return;
     }
 
-    // Reserve the first handshake only. Replay later frames only after the full
-    // connect admission (including bootstrap bookkeeping and hello delivery) settles.
+    // Reserve the first handshake only. Hello delivery retires pre-auth limits and
+    // replays queued frames; the final settlement callback remains a failure-path drain.
     queuedHandshakeFrames = [];
     dispatchIncomingMessage(data, flushQueuedHandshakeFrames);
   };

@@ -963,6 +963,28 @@ describe("attachGatewayWsMessageHandler post-connect health refresh", () => {
     expect(handleGatewayRequest).not.toHaveBeenCalled();
   });
 
+  it("retires pre-auth payload limits as soon as hello delivery succeeds", async () => {
+    const close = createCloseMock();
+    const harness = attachGatewayHarness({
+      connId: "conn-large-request-after-hello",
+      connectNonce: "nonce-large-request-after-hello",
+      deferSocketSend: true,
+      close,
+    });
+
+    harness.sendConnect("connect-before-large-request", BACKEND_CONNECT_PARAMS);
+    await waitForFast(() => expect(harness.socketSend).toHaveBeenCalledOnce());
+
+    harness.finishSocketSend();
+    await nextTurn();
+    harness.sendRequest("large-request-after-hello", "status.summary", {
+      payload: "x".repeat(MAX_PREAUTH_PAYLOAD_BYTES + 1),
+    });
+
+    await waitForFast(() => expect(handleGatewayRequest).toHaveBeenCalledOnce());
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized queued frame before the initial handshake completes", async () => {
     let closed = false;
     const close = vi.fn<CloseGatewayConnection>(() => {
