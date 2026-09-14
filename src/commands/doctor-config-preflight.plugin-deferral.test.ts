@@ -144,6 +144,58 @@ async function installStatelessFixture(
 }
 
 describe("configured plugin migration deferral", () => {
+  it.each([false, true])(
+    "honors the allowlist for ambient channel credentials (Discord allowed: %s)",
+    async (allowDiscord) => {
+      await withDoctorConfigPreflightHome(async (home) => {
+        const configPath = path.join(home, ".openclaw", "openclaw.json");
+        const pluginId = "missing-fixture";
+        const config = {
+          gateway: { mode: "local" },
+          plugins: {
+            allow: allowDiscord ? [pluginId, "discord"] : [pluginId],
+            entries: { [pluginId]: { enabled: true } },
+          },
+        };
+        await fs.mkdir(path.dirname(configPath), { recursive: true });
+        await fs.writeFile(configPath, JSON.stringify(config));
+        await withEnvAsync(
+          {
+            OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+            DISCORD_BOT_TOKEN: "synthetic-discord-token",
+            OPENCLAW_UPDATE_IN_PROGRESS: "1",
+            OPENCLAW_UPDATE_PARENT_SUPPORTS_DOCTOR_CONFIG_WRITE: "1",
+            OPENCLAW_UPDATE_POST_CORE_CONVERGENCE: undefined,
+          },
+          async () => {
+            const result = await runDoctorConfigPreflight({
+              migrateLegacyConfig: false,
+              invalidConfigNote: false,
+              doctorOnlyStateMigrations: true,
+              repairPrefixedConfig: true,
+            });
+            expect(result.snapshot.valid).toBe(true);
+            const pending = readDeferredPluginMigrations();
+            expect(pending.map((entry) => entry.pluginId)).toEqual(
+              allowDiscord ? ["discord", pluginId] : [pluginId],
+            );
+            expect(result.stateMigrationStepReceipts).toContainEqual(
+              expect.objectContaining({ id: `plugin:${pluginId}`, outcome: "deferred" }),
+            );
+            expect(
+              result.stateMigrationStepReceipts?.some(
+                (receipt) =>
+                  receipt.id === "plugin:discord" &&
+                  receipt.outcome === "deferred" &&
+                  receipt.warnings.some((warning) => warning.includes("openclaw update repair")),
+              ),
+            ).toBe(allowDiscord);
+          },
+        );
+      });
+    },
+  );
+
   it.each([
     { preparePluginMetadataSnapshot: true, contract: "absent" as const, nextDoctor: false },
     { preparePluginMetadataSnapshot: false, contract: "absent" as const, nextDoctor: false },

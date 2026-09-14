@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { resolveDeferredPluginMigrationConfigPaths } from "../config/deferred-plugin-migration-config.js";
 import type { ConfigSnapshotReadMeasure } from "../config/io.js";
+import { resolveConfigPath } from "../config/paths.js";
 import type { ConfigFileSnapshot } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -35,9 +37,19 @@ export function createDoctorPluginMigrationPreparation(params: {
   doctorOnlyStateMigrations: boolean;
   log?: MigrationLogger;
 }) {
-  const previous = readDeferredPluginMigrations({ env: params.env() });
-  const previousById = new Map(previous.map((entry) => [entry.pluginId, entry]));
-  let deferred = previous;
+  const previousById = new Map<string, DeferredPluginMigration>();
+  let deferred: readonly DeferredPluginMigration[] = [];
+  let previousLoaded = false;
+  const loadPrevious = (snapshot?: ConfigFileSnapshot) => {
+    if (previousLoaded || !(snapshot?.exists ?? existsSync(resolveConfigPath(params.env())))) {
+      return;
+    }
+    deferred = readDeferredPluginMigrations({ env: params.env() });
+    for (const entry of deferred) {
+      previousById.set(entry.pluginId, entry);
+    }
+    previousLoaded = true;
+  };
   let prepared = false;
   const completedIds = new Set<string>();
   const reportedIds = new Set<string>();
@@ -69,6 +81,10 @@ export function createDoctorPluginMigrationPreparation(params: {
     }
   };
   const prepare = async (snapshot: ConfigFileSnapshot) => {
+    loadPrevious(snapshot);
+    if (!snapshot.exists) {
+      return [...previousById.values()];
+    }
     if (!prepared && params.enabled) {
       const availability = await inspectPluginMigrationAvailability({
         cfg: snapshot.sourceConfig,
@@ -115,10 +131,14 @@ export function createDoctorPluginMigrationPreparation(params: {
     deferred: () => deferred,
     hasPending: () => previousById.size > 0,
     prepare,
-    snapshotOptions: () => ({
-      preparePluginMigrations: !prepared && params.enabled ? prepare : undefined,
-      deferredPluginMigrations: [...previousById.values()],
-    }),
+    snapshotOptions: () => {
+      // Existing pending inputs must reach the first config read before backup selection.
+      loadPrevious();
+      return {
+        preparePluginMigrations: !prepared && params.enabled ? prepare : undefined,
+        deferredPluginMigrations: [...previousById.values()],
+      };
+    },
     async migrate(config: OpenClawConfig) {
       const { autoMigrateLegacyPluginDoctorState } =
         await import("../infra/state-migrations.plugin-doctor.js");

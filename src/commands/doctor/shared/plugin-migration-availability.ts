@@ -7,7 +7,10 @@ import { normalizePluginsConfig } from "../../../plugins/config-state.js";
 import { withPluginMetadataSnapshotScope } from "../../../plugins/current-plugin-metadata-snapshot.js";
 import { resolvePluginDoctorContractArtifact } from "../../../plugins/doctor-contract-artifact.js";
 import { loadManifestMetadataSnapshot } from "../../../plugins/manifest-contract-eligibility.js";
-import { isActivatedManifestOwner } from "../../../plugins/manifest-owner-policy.js";
+import {
+  isActivatedManifestOwner,
+  passesManifestOwnerBasePolicy,
+} from "../../../plugins/manifest-owner-policy.js";
 import { isPayloadMissing } from "../../../plugins/payload-verification.js";
 import { createPluginCache, withPluginCache } from "../../../plugins/plugin-cache.js";
 import {
@@ -104,7 +107,7 @@ export async function inspectPluginMigrationAvailability(params: {
         const statelessPluginIds: string[] = [];
         const normalizedConfig = normalizePluginsConfig(params.cfg.plugins);
         const pending = [...selected].toSorted().flatMap((pluginId) => {
-          if (blockedPluginIds.has(pluginId)) {
+          if (!passesManifestOwnerBasePolicy({ plugin: { id: pluginId }, normalizedConfig })) {
             return [];
           }
           const plugin = metadata.plugins.find((candidate) => candidate.id === pluginId);

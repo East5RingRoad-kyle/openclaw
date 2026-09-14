@@ -1644,14 +1644,14 @@ function assertExpectedMissingCodexOutcome(result, expectedVersion) {
       failure.message.startsWith(missingPackage),
     "missing Codex update retained an unexpected plugin failure",
   );
-  const command = "openclaw plugins update codex";
+  const repairCommand = "openclaw plugins update codex";
   assert(
     plugins.warnings?.some(
       (warning) =>
         warning.pluginId === "codex" &&
         warning.reason === failure.message &&
-        warning.guidance?.includes(command) &&
-        warning.message?.includes(`Run \`${command}\``),
+        warning.guidance?.includes(repairCommand) &&
+        warning.message?.includes(`Run \`${repairCommand}\``),
     ),
     "missing Codex update omitted matching actionable recovery guidance",
   );
