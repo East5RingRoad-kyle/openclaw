@@ -375,10 +375,10 @@ async function projectQaEvidenceArtifacts(params: {
           source: "qa-suite",
         });
       }
-      for (const artifact of [...artifacts]) {
-        if (artifact.source !== "qa-suite" || artifact.kind !== "summary") {
-          continue;
-        }
+      const summaryArtifacts = artifacts.filter(
+        (artifact) => artifact.source === "qa-suite" && artifact.kind === "summary",
+      );
+      for (const artifact of summaryArtifacts) {
         const summaryPath = await resolveArtifactFileWithinRoots({
           artifactPath: artifact.path,
           evidenceDir,

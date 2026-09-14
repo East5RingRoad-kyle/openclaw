@@ -29,16 +29,24 @@ export async function captureQaEvidenceSourceIdentity(repoRoot: string) {
   if (!patch.length && !untracked.length) {
     return { gitSha, sourceDirty: false, sourcePatchSha256: null };
   }
-  const hash = createHash("sha256").update(patch);
+  // Frame the patch and each file independently so binary contents cannot
+  // impersonate another file's path/mode header in the source identity.
+  const hash = createHash("sha256").update(createHash("sha256").update(patch).digest());
   for (const relativePath of untracked) {
     const filePath = path.join(repoRoot, relativePath);
     const stat = await fs.lstat(filePath);
-    hash.update(`\0${relativePath}\0${stat.mode}\0`);
-    if (stat.isSymbolicLink()) {
-      hash.update(await fs.readlink(filePath));
-    } else if (stat.isFile()) {
-      hash.update(await fs.readFile(filePath));
-    }
+    const contents = stat.isSymbolicLink()
+      ? await fs.readlink(filePath)
+      : stat.isFile()
+        ? await fs.readFile(filePath)
+        : "";
+    hash.update(
+      JSON.stringify([
+        relativePath,
+        stat.mode,
+        createHash("sha256").update(contents).digest("hex"),
+      ]),
+    );
   }
   return { gitSha, sourceDirty: true, sourcePatchSha256: hash.digest("hex") };
 }

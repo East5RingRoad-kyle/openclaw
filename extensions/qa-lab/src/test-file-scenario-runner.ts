@@ -601,7 +601,7 @@ export async function runQaTestFileScenarios(
         status: result.status,
         childEvidence,
         receipts,
-        entries: commandRows().map((entry) => ({ ...entry, coverage: [] })),
+        entries: commandRows().map((entry) => Object.assign({}, entry, { coverage: [] })),
       });
     } else {
       const hasProducerEntries = (producer?.entries.length ?? 0) > 0;

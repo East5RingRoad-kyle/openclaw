@@ -53,12 +53,13 @@ export function resolveQaEvidenceContainment(
     }
   }
   function rootId(id: string) {
-    let parent = parentById.get(id);
+    let root = id;
+    let parent = parentById.get(root);
     while (parent) {
-      id = parent;
-      parent = parentById.get(id);
+      root = parent;
+      parent = parentById.get(root);
     }
-    return id;
+    return root;
   }
   function isActive(id: string) {
     let parent = parentById.get(id);

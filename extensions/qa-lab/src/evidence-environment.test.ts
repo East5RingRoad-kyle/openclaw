@@ -38,6 +38,34 @@ afterEach(() => {
 });
 
 describe("captured evidence source identity", () => {
+  it("frames binary file contents separately from following untracked files", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "qa-source-framing-"));
+    let untracked = "a\0b\0";
+    execFileMock.mockImplementation((_command, args, _options, callback) =>
+      callback(
+        null,
+        args[0] === "rev-parse" ? "actual-head\n" : args[0] === "diff" ? "" : untracked,
+        "",
+      ),
+    );
+    try {
+      await fs.writeFile(path.join(root, "a"), "first");
+      await fs.writeFile(path.join(root, "b"), "second");
+      const secondMode = (await fs.lstat(path.join(root, "b"))).mode;
+      const separate = await captureQaEvidenceSourceIdentity(root);
+      await fs.writeFile(path.join(root, "a"), `first\0b\0${secondMode}\0second`);
+      await fs.unlink(path.join(root, "b"));
+      untracked = "a\0";
+      const combined = await captureQaEvidenceSourceIdentity(root);
+
+      expect(combined.gitSha).toBe(separate.gitSha);
+      expect(combined.sourceDirty).toBe(true);
+      expect(combined.sourcePatchSha256).not.toBe(separate.sourcePatchSha256);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("binds dirty tracked and untracked bytes while retaining the actual committed ref", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "qa-source-identity-"));
     let patch = "tracked change";
