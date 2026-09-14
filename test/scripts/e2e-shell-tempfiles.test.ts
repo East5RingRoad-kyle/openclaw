@@ -474,10 +474,8 @@ case "\${1:-} \${2:-}" in
         printf '%s\n' 'network connection reset' >&2
         exit 1
       fi
-      printf '%s\n' '╭─ ClawHub Security Audit ─────────────────────────────────────────────╮' >&2
-      printf '%s\n' '│ risky@1.0.0                                                         │' >&2
-      printf '%s\n' '│ Outcome: Blocked                                                    │' >&2
-      printf '%s\n' '╰──────────────────────────────────────────────────────────────────────╯' >&2
+      printf '%s\n' 'ClawHub found security risks in risky@1.0.0' >&2
+      printf '%s\n' 'Update cancelled; rerun with --acknowledge-clawhub-risk' >&2
       exit 1
     fi
     skill_dir="$HOME/.openclaw/workspace/skills/safe"
