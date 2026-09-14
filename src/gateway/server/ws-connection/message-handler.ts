@@ -617,4 +617,5 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
   };
 
   socket.on("message", onMessage);
+  return onMessage;
 }

@@ -414,7 +414,9 @@ function attachGatewayHarness(options: {
   };
   const advanceHandshakePhase = vi.fn();
   const clearHandshakeTimer = options.clearHandshakeTimer ?? vi.fn();
-  const handoffAuthenticatedReceive = options.handoffAuthenticatedReceive ?? vi.fn();
+  const handoffAuthenticatedReceive = vi.fn(() => {
+    options.handoffAuthenticatedReceive?.();
+  });
   const logWsControl = createLogger();
   const refreshConnectedUserProfile = vi.fn<
     NonNullable<GatewayRequestContext["refreshConnectedUserProfile"]>

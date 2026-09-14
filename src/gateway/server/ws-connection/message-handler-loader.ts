@@ -25,9 +25,9 @@ export function attachGatewayWsMessageHandlerOnDemand(params: GatewayWsMessageHa
       if (params.isClosed() || params.connectionWork.isClosing) {
         return;
       }
-      attachGatewayWsMessageHandler(params);
+      const receive = attachGatewayWsMessageHandler(params);
       for (const data of queued) {
-        params.socket.emit("message", data);
+        receive(data);
       }
     })
     .catch((error: unknown) => {
