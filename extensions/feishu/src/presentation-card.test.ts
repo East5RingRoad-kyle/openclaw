@@ -8,6 +8,57 @@ import {
 } from "./presentation-card.js";
 
 describe("buildFeishuPresentationCard", () => {
+  it("renders question options as callback buttons", () => {
+    const presentation = normalizeMessagePresentation({
+      blocks: [
+        {
+          type: "buttons",
+          buttons: [
+            {
+              label: "Confirm",
+              action: {
+                type: "question",
+                questionId: "question-1",
+                optionValue: "Confirm",
+              },
+            },
+            {
+              label: "Other…",
+              action: {
+                type: "question",
+                questionId: "question-1",
+                intent: "custom-input",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    if (!presentation) {
+      throw new Error("expected valid presentation");
+    }
+
+    expect(buildFeishuPresentationCard({ presentation }).body.elements).toEqual([
+      {
+        tag: "button",
+        text: { tag: "plain_text", content: "Confirm" },
+        type: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: expect.objectContaining({
+              oc: "ocf1",
+              k: "quick",
+              a: "feishu.payload.button",
+              q: "Confirm",
+            }),
+          },
+        ],
+      },
+      { tag: "markdown", content: "- Other…" },
+    ]);
+  });
+
   it("renders table blocks through the portable text fallback", () => {
     const presentation = normalizeMessagePresentation({
       blocks: [
