@@ -296,6 +296,97 @@ async function resolveCardActionChatType(params: {
   return "p2p";
 }
 
+
+interface FeishuCardButtonElement {
+  tag?: string;
+  behaviors?: { type?: string; value?: unknown }[];
+}
+
+function isQuestionCallbackBehavior(behavior: {
+  type?: string;
+  value?: unknown;
+}): boolean {
+  if (behavior.type !== "callback" || typeof behavior.value !== "string") {
+    return false;
+  }
+  try {
+    const decoded = JSON.parse(behavior.value) as { a?: string } | null;
+    return decoded?.a === "feishu.question.answer";
+  } catch {
+    return false;
+  }
+}
+
+async function disableFeishuQuestionCard(params: {
+  cfg: ClawdbotConfig;
+  account: ReturnType<typeof resolveFeishuRuntimeAccount>;
+  log: (message: string) => void;
+  event: FeishuCardActionEvent;
+  optionValue: string;
+  accountId?: string;
+  accepted: boolean;
+}): Promise<void> {
+  const { account, log, event, optionValue, accepted } = params;
+  const cardMessageId = event.context.open_message_id ?? event.open_message_id;
+  if (!cardMessageId || cardMessageId.startsWith("card-action-c-")) return;
+  const client = createFeishuClient(account);
+  const response = await client.im.message.get({
+    params: { user_id_type: "open_id" },
+    path: { message_id: cardMessageId },
+  });
+  if (response.code !== 0) {
+    throw new Error(`question card fetch failed (code=${response.code})`);
+  }
+  const rawContent = response.data?.items?.[0]?.body?.content ?? "";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return;
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !("body" in parsed) ||
+    !parsed.body ||
+    typeof parsed.body !== "object" ||
+    !("elements" in parsed.body) ||
+    !Array.isArray(parsed.body.elements)
+  ) {
+    return;
+  }
+  const card = parsed as {
+    schema?: string;
+    body: { elements: unknown[] };
+  };
+  if (card.schema !== "2.0") return;
+  const statusText = accepted
+    ? `✅ 已选择：${optionValue}`
+    : "⚠️ 该问题已被回答或已过期";
+  const newElements: unknown[] = [];
+  for (const element of card.body.elements) {
+    if (element && typeof element === "object" && "tag" in element) {
+      const candidate = element as FeishuCardButtonElement;
+      if (
+        candidate.tag === "button" &&
+        Array.isArray(candidate.behaviors) &&
+        candidate.behaviors.some(isQuestionCallbackBehavior)
+      ) {
+        continue;
+      }
+    }
+    newElements.push(element);
+  }
+  newElements.push({ tag: "markdown", content: statusText });
+  card.body.elements = newElements;
+  await client.im.message.patch({
+    path: { message_id: cardMessageId },
+    data: { content: JSON.stringify(card) },
+  });
+  log(
+    `feishu[${account.accountId}]: question card disabled (message=${cardMessageId}, accepted=${accepted})`,
+  );
+}
 async function sendInvalidInteractionNotice(params: {
   cfg: ClawdbotConfig;
   event: FeishuCardActionEvent;
@@ -452,14 +543,16 @@ export async function handleFeishuCardAction(params: {
           completeFeishuCardAction(event.token, account.accountId);
           return;
         }
+        let answerAccepted = false;
         try {
-          await questionGatewayRuntime.resolveOption({
+          const result = await questionGatewayRuntime.resolveOption({
             cfg,
             questionId,
             optionValue,
             senderId: event.operator.open_id,
             clientDisplayName: "Feishu question",
           });
+          answerAccepted = result.status === "answered";
         } catch (err) {
           log(
             `feishu[${account.accountId}]: failed to resolve question answer: ${
@@ -467,6 +560,21 @@ export async function handleFeishuCardAction(params: {
             }`,
           );
         }
+        await disableFeishuQuestionCard({
+          cfg,
+          account,
+          log,
+          event,
+          optionValue,
+          accountId,
+          accepted: answerAccepted,
+        }).catch((err) => {
+          log(
+            `feishu[${account.accountId}]: failed to update question card: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
         completeFeishuCardAction(event.token, account.accountId);
         return;
       }
