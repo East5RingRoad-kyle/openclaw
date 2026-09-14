@@ -443,13 +443,37 @@ export async function handleFeishuCardAction(params: {
           completeFeishuCardAction(event.token, account.accountId);
           return;
         }
-        await questionGatewayRuntime.resolveOption({
-          cfg,
-          questionId,
-          optionValue,
-          senderId: event.operator.open_id,
-          clientDisplayName: "Feishu question",
-        });
+        try {
+          const result = await questionGatewayRuntime.resolveOption({
+            cfg,
+            questionId,
+            optionValue,
+            senderId: event.operator.open_id,
+            clientDisplayName: "Feishu question",
+          });
+          const feedbackText =
+            result.status === "answered"
+              ? `✅ Answer submitted: ${optionValue}`
+              : "⚠️ This question was already answered or has expired.";
+          await sendMessageFeishu({
+            cfg,
+            to: resolveCallbackTarget(event),
+            text: feedbackText,
+            accountId,
+          }).catch(() => {});
+        } catch (err) {
+          log(
+            `feishu[${account.accountId}]: failed to resolve question answer: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          await sendInvalidInteractionNotice({
+            cfg,
+            event,
+            reason: "stale",
+            accountId,
+          }).catch(() => {});
+        }
         completeFeishuCardAction(event.token, account.accountId);
         return;
       }
