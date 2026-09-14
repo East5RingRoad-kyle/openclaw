@@ -187,6 +187,12 @@ function resolveFeishuCallbackButtonValue(button: MessagePresentationButton): st
   return button.value;
 }
 
+function resolveFeishuQuestionId(button: MessagePresentationButton): string | undefined {
+  return button.action?.type === "question" && "optionValue" in button.action
+    ? button.action.questionId
+    : undefined;
+}
+
 export function renderFeishuPresentationFallbackText(
   params: Parameters<typeof renderMessagePresentationFallbackText>[0],
   textFormat: FeishuPresentationTextFormat = "plain",
@@ -231,6 +237,7 @@ function mapFeishuButtonType(style: MessagePresentationButton["style"]) {
 function buildFeishuPayloadButton(button: MessagePresentationButton): Record<string, unknown> {
   const url = resolveSafeFeishuButtonUrl(resolveFeishuButtonUrl(button));
   const value = resolveFeishuCallbackButtonValue(button);
+  const questionId = resolveFeishuQuestionId(button);
   if (button.disabled || (!url && !value)) {
     // Keep each unavailable control visible without exposing rejected URLs or opaque values.
     return { tag: "markdown", content: `- ${escapeFeishuCardPlainText(button.label)}` };
@@ -244,8 +251,9 @@ function buildFeishuPayloadButton(button: MessagePresentationButton): Record<str
       type: "callback",
       value: createFeishuCardInteractionEnvelope({
         k: "quick",
-        a: "feishu.payload.button",
+        a: questionId ? "feishu.question.answer" : "feishu.payload.button",
         q: value,
+        ...(questionId ? { m: { questionId } } : {}),
       }),
     });
   }
