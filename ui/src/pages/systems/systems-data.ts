@@ -15,7 +15,7 @@ export type SystemsInventory = {
   errors: { nodes?: string; systemInfo?: string };
 };
 
-export type SystemsSessionRelation = {
+type SystemsSessionRelation = {
   // These are recorded bindings, not proof that a model turn ran on the host.
   kind: "placement" | "retained-placement" | "runner" | "exec-binding" | "gateway";
   session: GatewaySessionRow;

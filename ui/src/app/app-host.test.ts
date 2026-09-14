@@ -1,6 +1,5 @@
 /* @vitest-environment jsdom */
 
-import type { RouteLocation, RouterState } from "@openclaw/uirouter";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import type { AgentsListResult, GatewayAgentRow } from "../api/types.ts";
@@ -17,8 +16,9 @@ import { i18n } from "../i18n/index.ts";
 import { SESSION_FACE_PREFERENCE_PARAM } from "../lib/sessions/route-navigation.ts";
 import { createSessionCapabilityHarness } from "../lib/sessions/session-capability.test-support.ts";
 import { createStorageMock } from "../test-helpers/storage.ts";
-import { equalShellRouteState, selectShellRouteState } from "./app-host-route-state.ts";
+import { selectShellRouteState } from "./app-host-route-state.ts";
 import {
+  committedRouterState,
   createLazyElementSpec,
   resetAppHostTestGlobals,
   type ShellKeyboardState,
@@ -263,64 +263,7 @@ type ShellSessionNavigationState = {
   recoverNotFoundRoute: () => boolean;
 };
 
-function committedRouterState(
-  routeId: RouteId,
-  pathname: string,
-  data?: unknown,
-): RouterState<RouteId> {
-  const location = { pathname, search: "", hash: "" } satisfies RouteLocation;
-  return {
-    location,
-    resolvedLocation: location,
-    status: "success",
-    matches: [{ routeId, location, data }],
-    pendingMatches: [],
-    cachedMatches: [],
-  } as unknown as RouterState<RouteId>;
-}
-
 describe("OpenClaw app lifecycle", () => {
-  it("binds contextual navigation to the same rendered route as the workspace", () => {
-    const data = { source: "host" };
-    const renderSidebar = vi.fn(() => "Machine inventory");
-    const state = committedRouterState("systems", "/systems", data);
-    Object.assign(state.matches[0]!, { status: "success", module: { renderSidebar } });
-    const sidebar = selectShellRouteState(state).contextualSidebar;
-    expect(sidebar?.key).toBe("systems");
-    expect(sidebar?.render(sidebar.data, sidebar.loaderPending, true)).toBe("Machine inventory");
-    expect(renderSidebar).toHaveBeenCalledWith(data, false, true);
-
-    // A cold import keeps the current main page, so its contextual list stays too.
-    state.pendingMatches = [
-      { ...state.matches[0]!, routeId: "tasks", status: "pending", module: undefined },
-    ];
-    expect(selectShellRouteState(state).contextualSidebar?.key).toBe("systems");
-    Object.assign(state.pendingMatches[0]!, { status: "error", error: new Error("Route failed") });
-    expect(selectShellRouteState(state).contextualSidebar).toBeUndefined();
-  });
-
-  it("updates a contextual sidebar when its loader settles without a route change", () => {
-    const renderSidebar = vi.fn(() => "Machine inventory");
-    const state = committedRouterState("systems", "/systems");
-    Object.assign(state.matches[0]!, {
-      status: "pending",
-      module: { renderSidebar },
-      isFetching: "loader",
-    });
-    const pending = selectShellRouteState(state);
-    expect(equalShellRouteState(pending, selectShellRouteState(state))).toBe(true);
-    const data = { source: "Gateway" };
-    Object.assign(state.matches[0]!, { status: "success", data, isFetching: false });
-    const ready = selectShellRouteState(state);
-    expect(equalShellRouteState(pending, ready)).toBe(false);
-    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(true);
-    Object.assign(state.matches[0]!, { data: { source: "Worker" } });
-    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(false);
-    Object.assign(state.matches[0]!, { status: "error", error: new Error("Unavailable") });
-    expect(selectShellRouteState(state).contextualSidebar).toBeUndefined();
-    expect(equalShellRouteState(ready, selectShellRouteState(state))).toBe(false);
-  });
-
   it("hides revealed login credentials when the app connection epoch ends", () => {
     const app = document.createElement("openclaw-app") as unknown as AppLifecycleState;
     app.loginShowGatewaySecret = true;

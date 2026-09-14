@@ -11,26 +11,38 @@ export class SidebarContextController implements ReactiveController {
   }
 
   hostUpdate(): void {
-    if (this.key === this.presentedKey) {return;}
+    if (this.key === this.presentedKey) {
+      return;
+    }
     const scroller = this.scroller;
-    if (scroller) {this.positions.set(this.presentedKey, scroller.scrollTop);}
+    if (scroller) {
+      this.positions.set(this.presentedKey, scroller.scrollTop);
+    }
   }
 
   hostUpdated(): void {
-    if (this.key === this.presentedKey) {return;}
+    if (this.key === this.presentedKey) {
+      return;
+    }
     this.presentedKey = this.key;
     const scroller = this.scroller;
     if (scroller) {
       scroller.scrollTop = this.positions.get(this.key) ?? 0;
-      if (!this.host.contextualSidebar) {this.host.sessionData.updateSessionsScrollState(scroller);}
+      if (!this.host.contextualSidebar) {
+        this.host.sessionData.updateSessionsScrollState(scroller);
+      }
     }
   }
 
   handleScroll(event: Event): void {
     const scroller = event.currentTarget;
-    if (!(scroller instanceof HTMLElement)) {return;}
+    if (!(scroller instanceof HTMLElement)) {
+      return;
+    }
     this.positions.set(this.presentedKey, scroller.scrollTop);
-    if (!this.host.contextualSidebar) {this.host.sessionData.updateSessionsScrollState(scroller);}
+    if (!this.host.contextualSidebar) {
+      this.host.sessionData.updateSessionsScrollState(scroller);
+    }
   }
 
   private get key(): string {

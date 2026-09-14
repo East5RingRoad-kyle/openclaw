@@ -85,8 +85,9 @@ class SystemsSidebar extends OpenClawLightDomElement {
           placeholder=${t("systems.search")}
           .value=${controller.query}
           @input=${(event: InputEvent) => {
-            if (event.currentTarget instanceof HTMLInputElement)
-              {controller.search(event.currentTarget.value);}
+            if (event.currentTarget instanceof HTMLInputElement) {
+              controller.search(event.currentTarget.value);
+            }
           }}
         />
       </label>

@@ -67,7 +67,9 @@ export class SystemsController {
   }
 
   private notify(): void {
-    for (const listener of this.listeners) {listener();}
+    for (const listener of this.listeners) {
+      listener();
+    }
   }
 
   private projectRows(): void {
@@ -81,7 +83,9 @@ export class SystemsController {
   }
 
   select(id: string): void {
-    if (!this.current || !id.trim()) {return;}
+    if (!this.current || !id.trim()) {
+      return;
+    }
     this.telemetryRequest?.abort();
     this.telemetryRequest = undefined;
     this.selectedId = id;
@@ -105,10 +109,14 @@ export class SystemsController {
 
   /** A sidebar subscription only redraws; it never starts a second inventory reader. */
   setPresented(presented: boolean): void {
-    if (this.presented === presented) {return;}
+    if (this.presented === presented) {
+      return;
+    }
     this.presented = presented;
     if (!presented) {
-      for (const unsubscribe of this.subscriptions) {unsubscribe();}
+      for (const unsubscribe of this.subscriptions) {
+        unsubscribe();
+      }
       this.subscriptions = [];
       this.cancelRefresh();
       return;
@@ -120,7 +128,9 @@ export class SystemsController {
           this.clear();
         } else if (changed) {
           this.cancelRefresh();
-          if (snapshot.phase === "connected") {void this.refresh();}
+          if (snapshot.phase === "connected") {
+            void this.refresh();
+          }
         }
         this.notify();
       }),
@@ -129,15 +139,16 @@ export class SystemsController {
           event.event === "presence" ||
           event.event === "node.pair.resolved" ||
           event.event === "node.runnerInventory.changed"
-        )
-          {void this.refresh();}
-        else if (
+        ) {
+          void this.refresh();
+        } else if (
           event.event === "node.hostStats" &&
           isRecord(event.payload) &&
           typeof event.payload.nodeId === "string" &&
           this.selectedId === `node:${event.payload.nodeId}`
-        )
-          {void this.refreshTelemetry();}
+        ) {
+          void this.refreshTelemetry();
+        }
       }),
       this.context.sessions.subscribe(() => {
         this.projectRows();
@@ -145,8 +156,11 @@ export class SystemsController {
       }),
     ];
     this.lifecycle.transition(this.context.gateway.snapshot);
-    if (!this.current) {this.clear();}
-    else {void this.refresh();}
+    if (!this.current) {
+      this.clear();
+    } else {
+      void this.refresh();
+    }
   }
 
   private cancelRefresh(): void {
@@ -178,8 +192,9 @@ export class SystemsController {
       !this.current ||
       !scope ||
       !hasOperatorReadAccess(snapshot.hello?.auth ?? null)
-    )
-      {return;}
+    ) {
+      return;
+    }
     // Bursts of presence events must not continually cancel the only useful response.
     if (this.loading) {
       this.refreshQueued = true;
@@ -202,7 +217,9 @@ export class SystemsController {
         signal: request.signal,
         isCurrent,
       });
-      if (!inventory || !isCurrent()) {return;}
+      if (!inventory || !isCurrent()) {
+        return;
+      }
       const initial = this.inventory === null;
       this.inventory = inventory;
       this.projectRows();
@@ -219,7 +236,9 @@ export class SystemsController {
           null;
       }
     } catch (error) {
-      if (isCurrent()) {this.error = formatUiError(error);}
+      if (isCurrent()) {
+        this.error = formatUiError(error);
+      }
     } finally {
       if (isCurrent()) {
         this.loading = false;
@@ -227,7 +246,9 @@ export class SystemsController {
         const refreshQueued = this.refreshQueued;
         this.refreshQueued = false;
         this.notify();
-        if (refreshQueued) {void this.refresh();}
+        if (refreshQueued) {
+          void this.refresh();
+        }
       }
     }
   }
@@ -245,10 +266,13 @@ export class SystemsController {
       !inventory ||
       this.loading ||
       this.telemetryRequest
-    )
-      {return;}
+    ) {
+      return;
+    }
     const gatewayHost = selected.environment.id === "gateway";
-    if (!gatewayHost && selected.environment.type !== "node") {return;}
+    if (!gatewayHost && selected.environment.type !== "node") {
+      return;
+    }
     const request = new AbortController();
     this.telemetryRequest = request;
     const generation = this.generation;
@@ -267,7 +291,9 @@ export class SystemsController {
           {},
           { signal: request.signal },
         );
-        if (!isCurrent() || !this.inventory) {return;}
+        if (!isCurrent() || !this.inventory) {
+          return;
+        }
         const { systemInfo: _previousError, ...errors } = this.inventory.errors;
         this.inventory = { ...this.inventory, gatewaySystemInfo: info, errors };
         this.sampledAtMs = Date.now();
@@ -277,7 +303,9 @@ export class SystemsController {
           {},
           { signal: request.signal },
         );
-        if (!isCurrent() || !this.inventory) {return;}
+        if (!isCurrent() || !this.inventory) {
+          return;
+        }
         const { nodes: _previousError, ...errors } = this.inventory.errors;
         this.inventory = { ...this.inventory, nodes: result.nodes, errors };
       }
