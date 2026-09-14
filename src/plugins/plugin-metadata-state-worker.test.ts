@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import {
@@ -75,22 +75,32 @@ function familyHashes(databasePath: string) {
   });
 }
 
+function observeParentSqlite() {
+  const native = requireNodeSqlite();
+  return [
+    vi.spyOn(native.DatabaseSync.prototype, "prepare"),
+    vi.spyOn(native.DatabaseSync.prototype, "exec"),
+    ...(["get", "all", "run", "iterate"] as const).map((method) =>
+      vi.spyOn(native.StatementSync.prototype, method),
+    ),
+  ];
+}
+
 it("returns a persisted index row without main-thread SQL", async () => {
   const env = environment();
   const message = "persisted fixture diagnostic";
   await seed(env, index(message));
-  const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
-  const exec = vi.spyOn(DatabaseSync.prototype, "exec");
+  const counters = observeParentSqlite();
   try {
     await withPluginCache(createPluginCache(), async () => {
       const loaded = await readPersistedInstalledPluginIndex({ env });
       expect(loaded?.diagnostics).toEqual([{ level: "warn", message }]);
     });
-    expect(prepare).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
+    expect(counters.map((counter) => counter.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]);
   } finally {
-    prepare.mockRestore();
-    exec.mockRestore();
+    for (const counter of counters) {
+      counter.mockRestore();
+    }
   }
 });
 
@@ -183,8 +193,7 @@ it("returns persisted bundled recovery locations through its existing async cons
     },
   ];
   await seed(env, stored);
-  const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
-  const exec = vi.spyOn(DatabaseSync.prototype, "exec");
+  const counters = observeParentSqlite();
   try {
     await using cache = createPluginCache();
     const recovered = await withPluginCache(cache, () =>
@@ -193,11 +202,11 @@ it("returns persisted bundled recovery locations through its existing async cons
     expect(recovered).toHaveLength(1);
     expect(recovered[0]?.pluginId).toBe("fixture");
     expect(recovered[0]?.loadPaths).toContain(rootDir);
-    expect(prepare).not.toHaveBeenCalled();
-    expect(exec).not.toHaveBeenCalled();
+    expect(counters.map((counter) => counter.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]);
   } finally {
-    prepare.mockRestore();
-    exec.mockRestore();
+    for (const counter of counters) {
+      counter.mockRestore();
+    }
   }
 });
 
@@ -210,19 +219,18 @@ it("reads the installed ledger inside the existing install lifecycle lease witho
   await seed(env, stored);
   await withPluginLifecycleLease({ env }, async (lease) => {
     lease.assertOwned();
-    const prepare = vi.spyOn(DatabaseSync.prototype, "prepare");
-    const exec = vi.spyOn(DatabaseSync.prototype, "exec");
+    const counters = observeParentSqlite();
     try {
       const options = { env, filePath: lease.databasePath };
       expect(await loadInstalledPluginIndexInstallRecords(options)).toEqual(stored.installRecords);
       expect((await readPersistedInstalledPluginIndex(options))?.installRecords).toEqual(
         stored.installRecords,
       );
-      expect(prepare).not.toHaveBeenCalled();
-      expect(exec).not.toHaveBeenCalled();
+      expect(counters.map((counter) => counter.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]);
     } finally {
-      prepare.mockRestore();
-      exec.mockRestore();
+      for (const counter of counters) {
+        counter.mockRestore();
+      }
     }
     lease.assertOwned();
   });
