@@ -47,12 +47,15 @@ export type RedactPattern = string | ResolvedRedactPattern;
 
 const globalPatterns = new WeakMap<RegExp, RegExp>();
 
-export function* iterateRedactMatches(
+export function visitRedactMatches(
   text: string,
   pattern: ResolvedRedactPattern,
-): Iterable<RedactMatch> {
+  visit: (match: RedactMatch) => void,
+): void {
   if (!(pattern instanceof RegExp)) {
-    yield* pattern.exec(text);
+    for (const match of pattern.exec(text)) {
+      visit(match);
+    }
     return;
   }
   let regex = pattern;
@@ -68,7 +71,7 @@ export function* iterateRedactMatches(
   while (cursor <= text.length) {
     const previousIndex = regex.lastIndex;
     let match: RegExpExecArray | null;
-    // A yielded match can re-enter this scanner with the same compiled expression.
+    // A visitor can re-enter this scanner with the same compiled expression.
     try {
       regex.lastIndex = cursor;
       match = regex.exec(text);
@@ -83,12 +86,12 @@ export function* iterateRedactMatches(
       const codePoint = text.codePointAt(cursor);
       cursor += unicode && codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
     }
-    yield {
+    visit({
       match: match[0],
       groups: match.slice(1).map((group) => group ?? ""),
       input: text,
       offset: match.index,
-    };
+    });
   }
 }
 
@@ -106,10 +109,10 @@ export function replaceRedactPattern(
   }
   const parts: string[] = [];
   let end = 0;
-  for (const match of iterateRedactMatches(text, pattern)) {
+  visitRedactMatches(text, pattern, (match) => {
     parts.push(text.slice(end, match.offset), replace(match));
     end = match.offset + match.match.length;
-  }
+  });
   return parts.length ? parts.join("") + text.slice(end) : text;
 }
 

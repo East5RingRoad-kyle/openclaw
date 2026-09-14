@@ -15,7 +15,7 @@ import {
   type RedactionField,
 } from "./redact-json-tokens.js";
 import {
-  iterateRedactMatches,
+  visitRedactMatches,
   type RedactMatch,
   type ResolvedRedactPattern,
 } from "./redact-pattern-runtime.js";
@@ -39,7 +39,7 @@ export function getPatternRedactionEdits(
   getEdit: RedactionEditSelector,
 ): RedactionEdit[] {
   const edits: RedactionEdit[] = [];
-  for (const match of iterateRedactMatches(value, pattern)) {
+  visitRedactMatches(value, pattern, (match) => {
     const edit = getEdit(match, pattern, (start, end) => ({
       start,
       end,
@@ -48,7 +48,7 @@ export function getPatternRedactionEdits(
     if (edit && edit.end >= edit.start) {
       edits.push(edit);
     }
-  }
+  });
   return edits;
 }
 
@@ -458,14 +458,14 @@ export function redactJsonRecord(
           }
         }
       } else {
-        for (const match of iterateRedactMatches(current, pattern)) {
+        visitRedactMatches(current, pattern, (match) => {
           let capture: { start: number; end: number } | undefined;
           getEdit(match, pattern, (start, end) => {
             capture = { start, end };
             return undefined;
           });
           if (!capture || capture.end < capture.start) {
-            continue;
+            return;
           }
           // Batch rules need token coordinates only after a serialized match exists.
           if (batch && tokens.length === 0) {
@@ -545,7 +545,7 @@ export function redactJsonRecord(
             }
             add(token, { ...edit, replacement });
           }
-        }
+        });
       }
       if (!pending) {
         continue;
