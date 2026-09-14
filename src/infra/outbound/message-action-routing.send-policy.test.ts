@@ -2,6 +2,7 @@
 // policy after plugin preparation is absent.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
+import { resolveAgentRestartRecoveryContext } from "../../gateway/agent-turn/agent-restart-recovery-context.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { runMessageAction } from "./message-action-runner.js";
@@ -107,6 +108,56 @@ describe("runMessageAction core send routing", () => {
     });
     expect(sendText).not.toHaveBeenCalled();
   });
+
+  it.each(["global", "agent"] as const)(
+    "preserves an existing %s cross-provider opt-in for targetless recovery",
+    async (scope) => {
+      const sendText = registerSlackTextPlugin();
+      const policy = { crossContext: { allowAcrossProviders: true } };
+      const cfg: OpenClawConfig = {
+        ...slackConfig,
+        tools: {
+          message: scope === "global" ? policy : { crossContext: { allowAcrossProviders: false } },
+        },
+        agents: {
+          list: [{ id: "main", ...(scope === "agent" ? { tools: { message: policy } } : {}) }],
+        },
+      };
+      const recovery = resolveAgentRestartRecoveryContext({
+        isRestartRecoveryResumeRun: true,
+        canUseInternalRuntimeHandoff: true,
+        expectedExistingSessionId: "session-1",
+        resolvedSessionId: "session-1",
+        runId: "recovery-run",
+        sessionEntry: {
+          sessionId: "session-1",
+          updatedAt: 1,
+          restartRecoveryDeliveryRunId: "recovery-run",
+          restartRecoveryDeliverySourceRunId: "source-run",
+          restartRecoverySourceIngress: "control-ui",
+        },
+      });
+      expect(recovery?.messageChannel).toBe("webchat");
+      expect(recovery?.channel).toBeUndefined();
+
+      await expect(
+        runMessageAction({
+          cfg,
+          agentId: "main",
+          action: "send",
+          params: {
+            channel: "slack",
+            target: "channel:C123",
+            message: "synthetic opted-in recovery",
+            bestEffort: true,
+          },
+          toolContext: { currentChannelProvider: recovery?.messageChannel },
+          dryRun: false,
+        }),
+      ).resolves.toMatchObject({ kind: "send", channel: "slack", to: "channel:C123" });
+      expect(sendText).toHaveBeenCalledOnce();
+    },
+  );
 
   it("accepts Telegram numeric forum topic targets through plugin-owned grammar", async () => {
     setActivePluginRegistry(
