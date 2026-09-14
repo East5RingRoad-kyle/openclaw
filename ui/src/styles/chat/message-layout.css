@@ -107,12 +107,8 @@
   --chat-position-fade-top: 0px;
   --chat-position-fade-bottom: 0px;
 
-  position: relative;
-  display: grid;
-  grid-auto-rows: 12px;
-  /* Only the marks shrink; the track keeps its stable top as the composer grows. */
-  max-height: min(
-    100%,
+  --chat-position-marks-height: min(
+    var(--chat-position-rail-height),
     max(
       0px,
       calc(
@@ -120,6 +116,20 @@
           var(--chat-transcript-composer-underlap, 0px) - var(--chat-position-rail-top) -
           var(--chat-position-rail-clearance)
       )
+    )
+  );
+
+  position: relative;
+  display: grid;
+  grid-auto-rows: 12px;
+  /* Only the marks shrink; the track keeps its stable top as the composer grows. */
+  max-height: var(--chat-position-marks-height);
+  /* Keep the browser from clamping scrollTop when the composer collapses. */
+  padding-bottom: max(
+    0px,
+    calc(
+      var(--chat-position-scroll-top, 0px) + var(--chat-position-marks-height) -
+        var(--chat-position-rail-count) * 12px
     )
   );
   overflow: hidden auto;
