@@ -364,6 +364,7 @@ async function disableFeishuQuestionCard(params: {
     ? `✅ 已选择：${optionValue}`
     : "⚠️ 该问题已被回答或已过期";
   const newElements: unknown[] = [];
+  let removedQuestionButtons = false;
   for (const element of card.body.elements) {
     if (element && typeof element === "object" && "tag" in element) {
       const candidate = element as FeishuCardButtonElement;
@@ -372,11 +373,13 @@ async function disableFeishuQuestionCard(params: {
         Array.isArray(candidate.behaviors) &&
         candidate.behaviors.some(isQuestionCallbackBehavior)
       ) {
+        removedQuestionButtons = true;
         continue;
       }
     }
     newElements.push(element);
   }
+  if (!removedQuestionButtons) return;
   newElements.push({ tag: "markdown", content: statusText });
   card.body.elements = newElements;
   await client.im.message.patch({
