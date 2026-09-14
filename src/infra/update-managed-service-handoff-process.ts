@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { getFileLockProcessStartTime, isPidDefinitelyDead } from "../shared/pid-alive.js";
 import type { HandoffProcessIdentity } from "./update-managed-service-handoff-schema.js";
 import { readWindowsProcessArgsSync } from "./windows-port-pids.js";
@@ -26,6 +27,7 @@ export function createManagedHandoffProcessIdentityReader(options: {
   const warnedIdentityPids = new Set<number>();
   let selfIdentity: HandoffProcessIdentity | undefined;
   let parentStartIdentity: string | undefined;
+  let selfLauncherIdentity: string | null | undefined;
   function warn(pid: number, continuation: string) {
     if (warnedIdentityPids.has(pid)) {
       return;
@@ -57,11 +59,20 @@ export function createManagedHandoffProcessIdentityReader(options: {
   }
 
   function readWindowsArgvIdentity(pid: number): string | null {
-    const argv =
-      pid === process.pid
-        ? [process.argv0, ...process.execArgv, ...process.argv.slice(1)]
-        : readWindowsProcessArgsSync(pid, undefined, options.env);
-    return argv ? windowsArgvIdentity(argv) : null;
+    if (pid !== process.pid) {
+      const argv = readWindowsProcessArgsSync(pid, undefined, options.env);
+      return argv ? windowsArgvIdentity(argv) : null;
+    }
+    if (selfLauncherIdentity === undefined) {
+      // Node retains startup argv even after the CLI removes root profile options.
+      const report = process.report.getReport();
+      const argv = isRecord(report) && isRecord(report.header) ? report.header.commandLine : null;
+      selfLauncherIdentity =
+        Array.isArray(argv) && argv.every((arg: unknown): arg is string => typeof arg === "string")
+          ? windowsArgvIdentity(argv)
+          : null;
+    }
+    return selfLauncherIdentity;
   }
   function inspectProcessIdentity(
     value: HandoffProcessIdentity,
@@ -121,7 +132,13 @@ export function createManagedHandoffProcessIdentityReader(options: {
   }
   function processIdentity(pid = process.pid, argv?: readonly string[]): HandoffProcessIdentity {
     if (pid === process.pid && selfIdentity) {
-      if (!acceptSelfIdentity(selfIdentity)) {
+      // This executing process is live; only observed identity disagreement can revoke its pin.
+      const observed =
+        process.platform === "win32" &&
+        WINDOWS_ARGV_IDENTITY_PATTERN.test(selfIdentity.startIdentity)
+          ? readWindowsArgvIdentity(pid)
+          : readProcessStartIdentity(pid);
+      if (observed !== null && observed !== selfIdentity.startIdentity) {
         throw new Error("managed handoff process identity changed");
       }
       return { ...selfIdentity };

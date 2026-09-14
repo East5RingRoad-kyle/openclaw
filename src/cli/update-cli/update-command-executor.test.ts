@@ -431,12 +431,13 @@ describe("live update executor", () => {
 describe("candidate executor delegation", () => {
   const moduleUrl = new URL("./update-command-executor.ts", import.meta.url).href;
   it.each([
-    { mismatched: false, becomesReadable: false },
-    { mismatched: true, becomesReadable: false },
-    { mismatched: false, becomesReadable: true },
+    { mismatched: false, becomesReadable: false, revoked: false },
+    { mismatched: true, becomesReadable: false, revoked: false },
+    { mismatched: false, becomesReadable: true, revoked: false },
+    { mismatched: false, becomesReadable: false, revoked: true },
   ])(
-    "consumes the parent's bound creation identity when the Windows receiver cannot read its own (mismatch=$mismatched, fallback becomes readable=$becomesReadable)",
-    async ({ mismatched, becomesReadable }) => {
+    "consumes the parent's bound creation identity when the Windows receiver cannot read its own (mismatch=$mismatched, fallback becomes readable=$becomesReadable, revoked=$revoked)",
+    async ({ mismatched, becomesReadable, revoked }) => {
       const hostPlatform = process.platform;
       const existingUri = sqliteLocation.resolveExistingSqliteFileUri;
       vi.spyOn(sqliteLocation, "resolveExistingSqliteFileUri").mockImplementation((pathname) =>
@@ -469,9 +470,10 @@ describe("candidate executor delegation", () => {
         }
       });
       const parentIdentity = { pid: process.ppid, startIdentity: String(parentStart) };
-      const receiverIdentity = becomesReadable
-        ? createManagedHandoffLeaseStore().processIdentity()
-        : { pid: process.pid, startIdentity: String(receiverStart) };
+      const receiverIdentity =
+        becomesReadable || revoked
+          ? createManagedHandoffLeaseStore().processIdentity()
+          : { pid: process.pid, startIdentity: String(receiverStart) };
       const databasePath = path.join(temporary, "managed-update-handoffs.sqlite");
       const db = new DatabaseSync(databasePath);
       try {
@@ -499,13 +501,19 @@ describe("candidate executor delegation", () => {
       const parent = store.read(root);
       assert(parent.kind === "current");
       const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const effectPath = path.join(root, "authorized-effect");
+      let nestedStarted = false;
       const operation = vi.fn(async (fence: UpdateRecoveryFence) => {
         fence.assertCurrent();
         if (becomesReadable) {
           currentReceiverStart = receiverStart;
         }
+        if (revoked) {
+          replaceOwner();
+        }
         let nestedKey: string | undefined;
         await withUpdateCommandExecutorChild(fence, root, async (grant, bindChild) => {
+          nestedStarted = true;
           nestedKey = grant.childKey;
           const candidate = spawn(process.execPath, ["-e", "process.stdin.resume()"], {
             stdio: ["pipe", "ignore", "ignore"],
@@ -530,6 +538,7 @@ describe("candidate executor delegation", () => {
         assert(nestedKey);
         expect(store.read(nestedKey)).toEqual({ kind: "absent" });
         fence.assertCurrent();
+        fs.writeFileSync(effectPath, "owned");
         return "completed";
       });
       const result = withDelegatedUpdateCommandExecutor(
@@ -540,11 +549,15 @@ describe("candidate executor delegation", () => {
       );
       if (mismatched) {
         await expect(result).rejects.toThrow(/ownership|identity/);
+      } else if (revoked) {
+        await expect(result).rejects.toThrow(/ownership|settlement/);
       } else {
         await expect(result).resolves.toBe("completed");
       }
       expect(operation).toHaveBeenCalledTimes(mismatched ? 0 : 1);
-      if (!mismatched && !becomesReadable) {
+      expect(nestedStarted).toBe(!mismatched && !revoked);
+      expect(fs.existsSync(effectPath)).toBe(!mismatched && !revoked);
+      if (!mismatched && !becomesReadable && !revoked) {
         expect(warning).toHaveBeenCalledWith(
           expect.stringContaining("established by the live parent"),
         );

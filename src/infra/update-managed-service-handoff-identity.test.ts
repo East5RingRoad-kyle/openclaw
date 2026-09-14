@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -32,6 +35,63 @@ afterEach(() => {
 });
 
 describe("managed handoff Windows process identities", () => {
+  it.each([
+    { option: "--profile", args: ["--profile", "handoff-fixture"] },
+    { option: "--dev", args: ["--dev"] },
+  ])(
+    "keeps original launcher attribution after $option normalization in a real child",
+    async ({ args }) => {
+      vi.useRealTimers();
+      const root = dirs.make("handoff-original-argv-");
+      const fixturePath = path.join(root, "profile-identity.mjs");
+      const profileUrl = new URL("../cli/profile.ts", import.meta.url).href;
+      const identityUrl = new URL("./update-managed-service-handoff-process.ts", import.meta.url)
+        .href;
+      fs.writeFileSync(
+        fixturePath,
+        `
+      import assert from "node:assert/strict";
+      import childProcess from "node:child_process";
+      import {syncBuiltinESMExports} from "node:module";
+      import {parseCliProfileArgs} from ${JSON.stringify(profileUrl)};
+      import {createManagedHandoffProcessIdentityReader} from ${JSON.stringify(identityUrl)};
+      const originalArgv = process.report.getReport().header.commandLine;
+      const parsed = parseCliProfileArgs(process.argv);
+      assert(parsed.ok && parsed.profile);
+      process.argv = parsed.argv;
+      assert(!process.argv.includes("--profile") && !process.argv.includes("--dev"));
+      assert.deepEqual(process.report.getReport().header.commandLine, originalArgv);
+      childProcess.spawnSync = () => ({status: 0, stdout: "", stderr: ""});
+      syncBuiltinESMExports();
+      Object.defineProperty(process, "platform", {value: "win32"});
+      const original = createManagedHandoffProcessIdentityReader({env: {SystemRoot: "C:\\\\Windows"}})
+        .processIdentity(process.pid, originalArgv);
+      const receiver = createManagedHandoffProcessIdentityReader({env: {SystemRoot: "C:\\\\Windows"}});
+      assert.deepEqual(receiver.processIdentity(), original);
+      assert.equal(receiver.isProcessIdentityCurrent(original), true);
+      process.stdout.write("original launcher matched");
+    `,
+      );
+      const child = spawn(
+        process.execPath,
+        ["--import", path.resolve("scripts/tsx.mjs"), fixturePath, ...args, "update", "--yes"],
+        { stdio: ["ignore", "pipe", "pipe"], timeout: 10_000 },
+      );
+      const closed = once(child, "close");
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      try {
+        expect(await closed, stderr).toEqual([0, null]);
+        expect(stdout).toBe("original launcher matched");
+      } finally {
+        child.kill("SIGKILL");
+        await closed;
+      }
+    },
+  );
+
   it("makes published strict readers refuse fallback leases without changing numeric identities", () => {
     // v2026.9.4's nested strict contract must reject an identity it could mistake for PID reuse.
     const publishedIdentity = z.strictObject({
