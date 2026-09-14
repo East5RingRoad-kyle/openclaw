@@ -59,8 +59,7 @@ const enNewSessionSetup = {
 
 export const registerNewSessionSetupEnglish = Object.assign(
   () => {
-    // SAFETY: The canonical catalog defines newSession as an object; this only extends it.
-    Object.assign(en.newSession as TranslationMap, enNewSessionSetup.newSession);
+    Object.assign(en.newSession, enNewSessionSetup.newSession);
   },
   { catalog: enNewSessionSetup },
 );

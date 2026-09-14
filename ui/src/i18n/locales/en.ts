@@ -33,6 +33,7 @@ export const en: TranslationMap & {
     Record<"title" | "openWindow" | "unavailable" | "toggle" | "reconnect" | "connecting", string>;
   updates: TranslationMap;
   login: TranslationMap;
+  newSession: TranslationMap;
   skillWorkshop: TranslationMap;
 } = {
   pluginUi: {
