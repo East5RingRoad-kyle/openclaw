@@ -115,7 +115,6 @@ const publications: Record<string, string | symbol> = {
   "src/skills/runtime/refresh.ts": Symbol.for("openclaw.skillsRefreshTestApi"),
   "src/skills/runtime/remote-skills.ts": Symbol.for("openclaw.remoteNodeSkillsTestApi"),
   "src/system-agent/agent-turn.ts": Symbol.for("openclaw.systemAgentTurnTestApi"),
-  "src/system-agent/assistant-timeout.ts": Symbol.for("openclaw.systemAgentTimeoutTestApi"),
   "src/talk/client-voice-confirmation.ts": Symbol.for("openclaw.clientVoiceConfirmationTestApi"),
   "src/talk/client-voice-session.ts": Symbol.for("openclaw.clientVoiceSessionTestApi"),
   "src/tasks/generated-media-task-activity.ts": Symbol.for(
