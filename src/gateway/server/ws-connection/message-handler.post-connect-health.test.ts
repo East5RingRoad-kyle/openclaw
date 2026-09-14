@@ -441,7 +441,8 @@ function attachGatewayHarness(options: {
     if (closed || options.isClosed?.()) {
       return false;
     }
-    registeredProfileId = (next as { preparedRecipientProfileId?: string }).preparedRecipientProfileId;
+    registeredProfileId = (next as { preparedRecipientProfileId?: string })
+      .preparedRecipientProfileId;
     client = next;
     return true;
   });
