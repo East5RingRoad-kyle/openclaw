@@ -260,7 +260,7 @@ it("keeps final inventory usable before joining concurrent cache retirements", a
   const useFinalDependency = secondInstance.wrap(() => "available");
   const firstFinal = vi.fn();
   let sharedClosed = false;
-  const lastFinal = vi.fn(async (retire: () => Promise<void>) => {
+  const lastFinal = vi.fn<NonNullable<Parameters<typeof second.close>[0]>>(async (retire) => {
     finalEntered.resolve();
     await finalReleased.promise;
     await retire();

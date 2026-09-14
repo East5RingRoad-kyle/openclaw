@@ -191,8 +191,12 @@ function createGatewayCloseTestDeps(
   return {
     resolveGatewayContext: () => undefined,
     closePluginRegistry: async (onRetirement) => {
-      let retirement: Promise<void> | undefined;
-      const retire = () => (retirement ??= clearActivePluginRegistry());
+      let retirement: ReturnType<GatewayCloseParams["pluginMetadata"]["close"]> | undefined;
+      const retire = () =>
+        (retirement ??= clearActivePluginRegistry().then(() => ({
+          cleanupCount: 0,
+          failures: [],
+        })));
       await onRetirement?.(retire);
       await retire();
       return { memoryErrors: [], pluginFailures: [] };
@@ -200,13 +204,13 @@ function createGatewayCloseTestDeps(
     pluginMetadata: {
       beginClose() {},
       async close(onFinal, retireRegistry) {
-        let retirement: Promise<void> | undefined;
+        let retirement: ReturnType<GatewayCloseParams["pluginMetadata"]["close"]> | undefined;
         const retire = () =>
           (retirement ??= Promise.resolve()
             .then(retireRegistry)
-            .then(() => {}));
+            .then((result) => result ?? { cleanupCount: 0, failures: [] }));
         await onFinal?.(retire);
-        await retire();
+        return retire();
       },
     },
     bonjourStop: null,
@@ -504,9 +508,9 @@ describe("createGatewayCloseHandler", () => {
     },
   );
 
-  it.each([false, true])(
-    "rejects plugin cleanup failure after dependency teardown (sibling: %s)",
-    async (withSibling) => {
+  it.each(["final", "sibling", "cache"])(
+    "rejects plugin cleanup failure after dependency teardown (%s)",
+    async (mode) => {
       const failure = new Error("active instance cleanup failed");
       const registry = createEmptyPluginRegistry();
       const record = createPluginRecord({ id: "active-cleanup" });
@@ -517,14 +521,19 @@ describe("createGatewayCloseHandler", () => {
       });
       setActivePluginRegistry(registry);
       const owner = createPluginRegistryOwner(registry);
-      const sibling = withSibling
-        ? createPluginRegistryOwner(createEmptyPluginRegistry())
-        : undefined;
+      const metadata = mode === "cache" ? retainGatewayPluginMetadata() : undefined;
+      if (mode === "cache") {
+        registry.plugins.length = 0;
+        getPluginCache().instances.add(instance);
+      }
+      const sibling =
+        mode === "sibling" ? createPluginRegistryOwner(createEmptyPluginRegistry()) : undefined;
       const clearSecretsRuntimeSnapshot = vi.fn();
       await expect(
         createGatewayCloseHandler(
           createGatewayCloseTestDeps({
             closePluginRegistry: owner.close,
+            ...(metadata ? { pluginMetadata: metadata } : {}),
             clearSecretsRuntimeSnapshot,
           }),
         )(),
@@ -612,7 +621,7 @@ describe("createGatewayCloseHandler", () => {
         onStartFailure: () => true,
         onRemoved,
       });
-      const retireRegistry = vi.fn(async () => {});
+      const retireRegistry = vi.fn(async () => ({ cleanupCount: 0, failures: [] }));
       const closeSdkResources = vi.fn(async () => {});
       const clearSecretsRuntimeSnapshot = vi.fn();
       const close = createGatewayCloseHandler(
