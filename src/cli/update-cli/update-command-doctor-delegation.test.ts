@@ -67,7 +67,7 @@ it.each(
         const commandOptions = typeof options === "number" ? { timeoutMs: options } : options;
         return runChild(argv, {
           ...commandOptions,
-          beforeInput: (pid, argv) => {
+          beforeInput: (pid, spawnedArgv) => {
             reachedSpawn = true;
             if (fault === "requester-revoked") {
               requesterCurrent = false;
@@ -75,7 +75,7 @@ it.each(
             if (fault === "run-replaced") {
               params.opts.run = { runId: "replacement-run", env };
             }
-            commandOptions.beforeInput?.(pid, argv);
+            commandOptions.beforeInput?.(pid, spawnedArgv);
           },
         });
       });
