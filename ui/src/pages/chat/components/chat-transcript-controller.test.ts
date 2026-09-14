@@ -50,6 +50,14 @@ function stubMcpAppLifecycle(
   return { app: Object.assign(app, lifecycle), ...lifecycle };
 }
 
+function numberedContentRows(length: number): TestContentRow[] {
+  return Array.from({ length }, (_, index) => ({
+    kind: "content",
+    key: `row:${index}`,
+    content: html`<div>row ${index}</div>`,
+  }));
+}
+
 function mcpRangeRows(appContent: unknown): TestContentRow[] {
   return Array.from({ length: 24 }, (_, index) => ({
     kind: "content" as const,
@@ -445,11 +453,7 @@ describe("chat transcript controller", () => {
     async ({ behavior, resizeBefore, deltaY, observerLate }) => {
       const flushFrames = stubAnimationFrames();
       transcriptDomState.measuredRowHeight = 120;
-      const rows: TestContentRow[] = Array.from({ length: 40 }, (_, index) => ({
-        kind: "content",
-        key: `row:${index}`,
-        content: html`<div>row ${index}</div>`,
-      }));
+      const rows = numberedContentRows(40);
       const { container, renderRows, transcript } = await mountTestTranscript(
         `pane-${behavior}-${resizeBefore}-${deltaY}-${observerLate}-resize`,
         rows,
@@ -528,11 +532,7 @@ describe("chat transcript controller", () => {
   );
 
   it("keeps a smooth latest command through an idle observer delivery before reaching its target", async () => {
-    const rows: TestContentRow[] = Array.from({ length: 40 }, (_, index) => ({
-      kind: "content",
-      key: `row:${index}`,
-      content: html`<div>row ${index}</div>`,
-    }));
+    const rows = numberedContentRows(40);
     const { container, transcript } = await mountTestTranscript("idle-latest", rows);
     Object.defineProperties(container, {
       clientHeight: { configurable: true, value: 600 },
@@ -675,11 +675,7 @@ describe("chat transcript controller", () => {
           onReaderScroll: (towardEnd) => handleChatScrollTakeover(policy, towardEnd),
         },
       );
-      const rows: TestContentRow[] = Array.from({ length: 12 }, (_, index) => ({
-        kind: "content",
-        key: `row:${index}`,
-        content: html`<div>row ${index}</div>`,
-      }));
+      const rows = numberedContentRows(12);
       const { container } = await mountTestTranscript(`height-resize-${locked}`, rows, transcript);
       try {
         const total = transcriptSize(container);
@@ -733,11 +729,7 @@ describe("chat transcript controller", () => {
 
   it("keeps a reader above the padded real end stationary when a rendered row grows", async () => {
     transcriptDomState.measuredRowHeight = 120;
-    const rows: TestContentRow[] = Array.from({ length: 12 }, (_, index) => ({
-      kind: "content",
-      key: `row:${index}`,
-      content: html`<div>row ${index}</div>`,
-    }));
+    const rows = numberedContentRows(12);
     const { container, renderRows, transcript } = await mountTestTranscript(
       "padded-row-resize",
       rows,
@@ -865,11 +857,7 @@ describe("chat transcript controller", () => {
   ])(
     "follows appended typing only when permitted near the real end ($distance, $followEnabled)",
     async ({ distance, followEnabled }) => {
-      const rows: TestContentRow[] = Array.from({ length: 12 }, (_, index) => ({
-        kind: "content",
-        key: `row:${index}`,
-        content: html`<div>row ${index}</div>`,
-      }));
+      const rows = numberedContentRows(12);
       const { container, renderRows, transcript } = await mountTestTranscript(
         `typing-distance-${distance}`,
         rows,
@@ -915,11 +903,7 @@ describe("chat transcript controller", () => {
 
   it("cancels typing follow before later geometry can retarget the reader", async () => {
     const flushFrames = stubAnimationFrames();
-    const rows: TestContentRow[] = Array.from({ length: 12 }, (_, index) => ({
-      kind: "content",
-      key: `row:${index}`,
-      content: html`<div>row ${index}</div>`,
-    }));
+    const rows = numberedContentRows(12);
     const { container, renderRows, transcript } = await mountTestTranscript(
       "typing-interrupt",
       rows,
