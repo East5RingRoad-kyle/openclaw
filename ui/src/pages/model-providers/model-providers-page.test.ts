@@ -241,7 +241,7 @@ describe("ModelProvidersPage agent scope", () => {
     expect(agentSelection.set).toHaveBeenCalledWith("writer");
     expect(agentSelection.setScope).not.toHaveBeenCalled();
     expect(page.querySelector(".page-subtitle")?.textContent).toContain(
-      "Providers and credentials for the selected agent.",
+      "Global model defaults and provider access for your agents.",
     );
   });
 
@@ -253,19 +253,6 @@ describe("ModelProvidersPage agent scope", () => {
     const link = page.querySelector<HTMLAnchorElement>(".page-subtitle a");
     expect(link?.textContent?.trim()).toBe("Learn more");
     expect(link?.href).toBe("https://docs.openclaw.ai/concepts/model-providers");
-  });
-
-  it("opens model setup from the Model setup action", async () => {
-    const { context } = createHarness("main");
-    const page = appendPage(context);
-    await page.updateComplete;
-
-    const action = [
-      ...page.querySelectorAll<HTMLButtonElement>(".page-header-actions button"),
-    ].find((button) => button.textContent?.includes("Model setup"));
-    expect(action?.querySelector("svg")).not.toBeNull();
-    action?.click();
-    expect(context.navigate).toHaveBeenCalledWith("model-setup");
   });
 
   it.each([
@@ -524,7 +511,7 @@ describe("ModelProvidersPage agent scope", () => {
     expect(runtimeConfig.patch).not.toHaveBeenCalled();
     expect(page.addProviderOpen).toBe(true);
     expect(page.addProviderKey).toBe("");
-    const form = page.querySelector(".model-providers__add-form")?.parentElement;
+    const form = page.querySelector("[data-models-key-dialog]");
     expect(
       [...form!.querySelectorAll('[role="status"]')].map((message) => message.textContent?.trim()),
     ).toEqual(["Provider anthropic added.", "config.get failed after provider add"]);
@@ -1032,7 +1019,7 @@ describe("ModelProvidersPage agent scope", () => {
     await waitForProviders(page);
     request.mockClear();
 
-    await page.probe("openai", ["openai"]);
+    await page.profileActions.probe("openai", ["openai"]);
 
     expect(request).toHaveBeenCalledWith("models.probe", {
       provider: "openai",
@@ -1048,7 +1035,7 @@ describe("ModelProvidersPage agent scope", () => {
     const firstProbe = deferred<ModelsProbeResult>();
     request.mockImplementationOnce(() => firstProbe.promise);
 
-    const probing = page.probe("anthropic", ["anthropic", "claude-cli"]);
+    const probing = page.profileActions.probe("anthropic", ["anthropic", "claude-cli"]);
     await vi.waitFor(() =>
       expect(request).toHaveBeenCalledWith("models.probe", {
         provider: "anthropic",
@@ -1078,7 +1065,7 @@ describe("ModelProvidersPage agent scope", () => {
     const pending = deferred<ModelsProbeResult>();
     request.mockImplementationOnce(() => pending.promise);
 
-    const probing = page.probe("openai", ["openai"]);
+    const probing = page.profileActions.probe("openai", ["openai"]);
     await vi.waitFor(() =>
       expect(request).toHaveBeenCalledWith("models.probe", {
         provider: "openai",

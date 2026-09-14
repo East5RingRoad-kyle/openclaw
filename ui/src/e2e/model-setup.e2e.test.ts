@@ -1,6 +1,7 @@
 // Control UI tests cover guided model setup against a mocked Gateway.
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { Page } from "playwright";
 import { beforeEach, expect, it } from "vitest";
 import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
 import { takeControlUiViewportScreenshot } from "../test-helpers/control-ui-e2e-screenshot.ts";
@@ -12,6 +13,33 @@ const suite = createControlUiE2eSuite({
   startServerBeforeBrowser: true,
   unavailableMessage: (executablePath) => `Playwright Chromium is unavailable at ${executablePath}`,
 });
+
+// These cases exercise advanced setup through Models, with credential-only
+// choices intentionally absent so manual-only setup stays available.
+function installSetupGateway(page: Page, options: Parameters<typeof installMockGateway>[1]) {
+  return installMockGateway(page, {
+    ...options,
+    featureMethods: [
+      "config.get",
+      "config.patch",
+      "models.authStatus",
+      "models.list",
+      ...(options?.featureMethods ?? []),
+    ],
+    methodResponses: {
+      "models.authStatus": { ts: 1, providers: [], providerCapabilities: [] },
+      ...options?.methodResponses,
+    },
+  });
+}
+
+async function openModelSetup(page: Page) {
+  const response = await page.goto(`${suite.server.baseUrl}settings/model-setup`);
+  await page.locator("[data-models-login-discover]").click();
+  await page.getByRole("heading", { name: "On this Gateway", exact: true }).waitFor();
+  expect(new URL(page.url()).pathname).toBe("/settings/model-providers");
+  return response;
+}
 
 const artifactRoot = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR?.trim();
 let artifactDir: string | undefined;
@@ -66,7 +94,7 @@ suite.define(() => {
           recommended: false,
           credentials: true,
         };
-        const gateway = await installMockGateway(page, {
+        const gateway = await installSetupGateway(page, {
           featureMethods: ["chat.metadata", "chat.startup", "openclaw.setup.detect"],
           methodResponses: {
             "openclaw.setup.detect": {
@@ -83,7 +111,7 @@ suite.define(() => {
           },
         });
 
-        await page.goto(`${suite.server.baseUrl}settings/model-setup`);
+        await openModelSetup(page);
         const row = page.locator('[data-candidate-kind="codex-cli"]');
         await expect.poll(() => row.textContent()).toContain("ChatGPT account · alex@example.com");
         if (artifactDir) {
@@ -120,7 +148,7 @@ suite.define(() => {
         viewport: { height: 900, width: 1280 },
       },
       async ({ page }) => {
-        const gateway = await installMockGateway(page, {
+        const gateway = await installSetupGateway(page, {
           featureMethods: [
             "chat.metadata",
             "chat.startup",
@@ -257,7 +285,7 @@ suite.define(() => {
           workspace: "/tmp/openclaw-e2e",
           setupComplete: false,
         };
-        const gateway = await installMockGateway(page, {
+        const gateway = await installSetupGateway(page, {
           featureMethods: [
             "chat.metadata",
             "chat.startup",
@@ -304,7 +332,7 @@ suite.define(() => {
           },
         });
 
-        const response = await page.goto(`${suite.server.baseUrl}settings/model-setup`);
+        const response = await openModelSetup(page);
         expect(response?.status()).toBe(200);
         const configReadsBeforeStart = (await gateway.getRequests("config.get")).length;
         await gateway.deferNext("config.get");
@@ -397,7 +425,7 @@ suite.define(() => {
           workspace: "/tmp/openclaw-e2e",
           setupComplete: false,
         };
-        const gateway = await installMockGateway(page, {
+        const gateway = await installSetupGateway(page, {
           featureMethods: [
             "chat.metadata",
             "chat.startup",
@@ -485,7 +513,7 @@ suite.define(() => {
           },
         });
 
-        const response = await page.goto(`${suite.server.baseUrl}settings/model-setup`);
+        const response = await openModelSetup(page);
         expect(response?.status()).toBe(200);
         const localProviderIcons = page.locator(
           [
@@ -581,13 +609,10 @@ suite.define(() => {
           recommendedInstalls: [],
           setupComplete: true,
         });
-        await page.getByRole("button", { name: "Stay in settings" }).click();
-        const currentConnection = page.locator(".model-setup__current");
-        await currentConnection.getByText("Ollama", { exact: true }).waitFor();
-        await currentConnection.getByText("qwen3:0.6b", { exact: true }).waitFor();
-        await expect
-          .poll(() => currentConnection.locator('[data-provider-icon="ollama"]').count())
-          .toBe(1);
+        await page.getByRole("button", { name: "Return to Models" }).click();
+        await page.locator(".model-providers__defaults").waitFor();
+        await expect.poll(() => page.locator("openclaw-modal-dialog").count()).toBe(0);
+        expect(new URL(page.url()).pathname).toBe("/settings/model-providers");
         if (artifactDir) {
           await page.screenshot({
             animations: "disabled",
@@ -623,7 +648,7 @@ suite.define(() => {
         viewport: { height: 1000, width: 1440 },
       },
       async ({ page }) => {
-        const gateway = await installMockGateway(page, {
+        const gateway = await installSetupGateway(page, {
           featureMethods: [
             "chat.metadata",
             "chat.startup",
@@ -633,6 +658,27 @@ suite.define(() => {
             "wizard.next",
           ],
           methodResponses: {
+            "models.authStatus": {
+              ts: 1,
+              providers: [],
+              providerCapabilities: [
+                {
+                  provider: "qwen",
+                  apiKeySupported: true,
+                  quickApiKeySetup: false,
+                  loginOptions: [
+                    {
+                      id: "qwen-oauth",
+                      brandId: "qwen",
+                      groupLabel: "Qwen Cloud",
+                      label: "Qwen sign-in",
+                      kind: "oauth",
+                      featured: false,
+                    },
+                  ],
+                },
+              ],
+            },
             "openclaw.setup.detect": {
               candidates: [],
               unavailableCandidates: [],
@@ -682,9 +728,9 @@ suite.define(() => {
           },
         });
 
-        const response = await page.goto(`${suite.server.baseUrl}settings/model-setup`);
+        const response = await openModelSetup(page);
         expect(response?.status()).toBe(200);
-        await page.getByRole("heading", { name: "Connect a verified AI model" }).waitFor();
+        await page.getByRole("heading", { name: "On this Gateway", exact: true }).waitFor();
         await expect.poll(() => page.getByText("Gemini CLI OAuth").count()).toBe(0);
         await expect.poll(() => page.getByText("Found, but needs attention").count()).toBe(0);
 
@@ -856,7 +902,7 @@ suite.define(() => {
               requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
             }),
         );
-        await page.getByRole("button", { name: "Connect & verify" }).click();
+        await page.getByRole("button", { name: "Connect & use for this agent" }).click();
         const activate = await gateway.waitForRequest("openclaw.setup.activate.start");
         expect(activate.params).toEqual({
           sessionId: expect.any(String),
@@ -895,7 +941,9 @@ suite.define(() => {
 
         const detectCountBeforeDismiss = (await gateway.getRequests("openclaw.setup.detect"))
           .length;
-        await page.getByRole("button", { name: "Stay in settings" }).click();
+        await page.getByRole("button", { name: "Return to Models" }).click();
+        await page.locator("[data-models-connect]").click();
+        await page.locator("[data-models-login-discover]").click();
         await expect
           .poll(async () => (await gateway.getRequests("openclaw.setup.detect")).length)
           .toBe(detectCountBeforeDismiss + 1);
@@ -908,5 +956,51 @@ suite.define(() => {
         await expect.poll(() => page.getByText("Gemini CLI OAuth").count()).toBe(0);
       },
     );
+  });
+  it("keeps the Close action inside a dense discovery panel before any scrolling", async () => {
+    await suite.withPage({ viewport: { width: 1280, height: 900 } }, async ({ page }) => {
+      await installSetupGateway(page, {
+        featureMethods: ["openclaw.setup.detect"],
+        methodResponses: {
+          "openclaw.setup.detect": {
+            candidates: Array.from({ length: 8 }, (_, index) => ({
+              kind: "saved-auth:fixture",
+              label: "Saved provider " + index,
+              detail: "An existing connection available for this agent",
+              modelRef: "fixture/model-" + index,
+              credentials: true,
+              recommended: false,
+            })),
+            manualProviders: [],
+            prepareOptions: localPrepareOptions,
+            workspace: "/workspace/demo",
+            setupComplete: false,
+          },
+        },
+      });
+      await openModelSetup(page);
+      const panel = page.locator(".model-setup-discovery");
+      const close = panel.getByRole("button", { name: "Close", exact: true });
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect
+          .poll(async () => {
+            const panelBox = await panel.boundingBox();
+            const closeBox = await close.boundingBox();
+            return Boolean(
+              panelBox &&
+              closeBox &&
+              closeBox.y >= panelBox.y &&
+              closeBox.y + closeBox.height <= panelBox.y + panelBox.height,
+            );
+          })
+          .toBe(true);
+        const body = panel.locator(":scope > .model-setup-wizard__body");
+        expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+        expect(await body.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      }
+      await close.click();
+      await expect.poll(() => page.locator("openclaw-modal-dialog").count()).toBe(0);
+    });
   });
 });

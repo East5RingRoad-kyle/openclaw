@@ -15,12 +15,15 @@ export type ModelProvidersRouteData = {
   client: ApplicationContext["gateway"]["snapshot"]["client"];
   /** Concrete agent whose credential store populated the auth snapshot. */
   agentId: string | null;
+  /** An explicit connection entry from a saved setup link. */
+  connect?: boolean;
 };
 
 async function loadModelProvidersRouteData(
   context: Pick<ApplicationContext, "gateway" | "agents" | "agentSelection">,
   options: RouteLoaderOptions,
 ): Promise<ModelProvidersRouteData> {
+  const connect = new URLSearchParams(options.location.search).get("connect") === "1";
   const gateway = context.gateway;
   const gatewaySnapshot = gateway.snapshot;
   let agentId = context.agentSelection.state.selectedId;
@@ -39,7 +42,14 @@ async function loadModelProvidersRouteData(
     );
   };
   if (!client || !isCurrent()) {
-    return { gateway, gatewaySnapshot, data: EMPTY_MODEL_PROVIDERS_DATA, client: null, agentId };
+    return {
+      gateway,
+      gatewaySnapshot,
+      data: EMPTY_MODEL_PROVIDERS_DATA,
+      client: null,
+      agentId,
+      connect,
+    };
   }
   if (!agentId) {
     const roster = await context.agents.ensureList();
@@ -47,11 +57,19 @@ async function loadModelProvidersRouteData(
     agentId = roster ? normalizeAgentId(roster.defaultId) : null;
   }
   if (!agentId || !isCurrent()) {
-    return { gateway, gatewaySnapshot, data: EMPTY_MODEL_PROVIDERS_DATA, client: null, agentId };
+    return {
+      gateway,
+      gatewaySnapshot,
+      data: EMPTY_MODEL_PROVIDERS_DATA,
+      client: null,
+      agentId,
+      connect,
+    };
   }
   return {
     gateway,
     gatewaySnapshot,
+    connect,
     data: await loadModelProvidersData(client, { agentId, signal: options.signal }),
     client,
     agentId,
@@ -60,6 +78,7 @@ async function loadModelProvidersRouteData(
 
 export const page = definePage({
   ...routePageSpec("model-providers"),
+  loaderDeps: (_context, location) => location.search,
   loader: loadModelProvidersRouteData,
   component: () =>
     import("./model-providers-page.ts").then(() => ({

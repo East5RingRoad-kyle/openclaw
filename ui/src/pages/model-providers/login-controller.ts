@@ -1,6 +1,8 @@
 import { html, nothing, type ReactiveController, type ReactiveControllerHost } from "lit";
+import { createRef, ref } from "lit/directives/ref.js";
 import type { ProviderLoginOption } from "../../api/types.ts";
 import type { ApplicationContext } from "../../app/context.ts";
+import { providerDisplayLabel, renderProviderBrandIcon } from "../../components/provider-icon.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import "../../styles/model-setup.css";
@@ -19,10 +21,27 @@ type LoginControllerOptions = {
   canStart: () => boolean;
   canContinue: () => boolean;
   refresh: () => Promise<void>;
+  onDiscover?: () => void;
+  onApiKey?: (provider: string) => void;
+};
+
+type LoginProvider = {
+  id: string;
+  label: string;
+  choices: ProviderLoginOption[];
+  apiKeyProvider?: string;
 };
 
 export class ModelProviderLoginController implements ReactiveController {
-  private picker: { providers?: string[]; choice: string } | null = null;
+  private picker: {
+    providers?: string[];
+    providerId: string;
+    choice: string;
+    query: string;
+  } | null = null;
+  private readonly searchInput = createRef<HTMLInputElement>();
+  private readonly methodSelect = createRef<HTMLSelectElement>();
+  private focusPicker: "search" | "method" | null = null;
   private state: ModelSetupWizardState = { phase: "idle" };
   private value: unknown;
   private generation = 0;
@@ -72,7 +91,7 @@ export class ModelProviderLoginController implements ReactiveController {
       loginBusy: this.busy,
       onConnect: (card: ModelProviderCard) => this.open([card.id, ...card.credentialProviderIds]),
       canConnect: (card: ModelProviderCard) =>
-        this.loginOptions([card.id, ...card.credentialProviderIds]).length > 0,
+        this.loginProviders([card.id, ...card.credentialProviderIds]).length > 0,
     };
   }
 
@@ -80,30 +99,91 @@ export class ModelProviderLoginController implements ReactiveController {
     return {
       selectedAgentId: this.options.getScope().agentId,
       onConnect: () => this.open(),
-      connectDisabled: !this.options.canStart() || this.busy || this.loginOptions().length === 0,
+      connectDisabled:
+        !this.options.canStart() ||
+        this.busy ||
+        (this.loginProviders().length === 0 && !this.options.onDiscover),
       login: this.render(),
       loginMessage: this.message,
     };
   }
 
-  private loginOptions(providers?: string[]): ProviderLoginOption[] {
-    const choices = new Map<string, ProviderLoginOption>();
+  private loginProviders(providers?: string[]): LoginProvider[] {
+    const groups = new Map<string, LoginProvider>();
+    const choices = new Set<string>();
     for (const capability of this.options.getScope().data?.authStatus?.providerCapabilities ?? []) {
       if (providers && !providers.includes(capability.provider)) {
         continue;
       }
       for (const option of capability.loginOptions ?? []) {
-        choices.set(option.id, option);
+        if (choices.has(option.id)) {
+          continue;
+        }
+        choices.add(option.id);
+        let group = groups.get(option.brandId);
+        if (!group) {
+          group = { id: option.brandId, label: "", choices: [] };
+          groups.set(group.id, group);
+        }
+        group.label ||= option.groupLabel?.trim() ?? "";
+        group.choices.push(option);
+      }
+      // Quick-key support is independent of wizard choices. Keep the exact
+      // capability owner for the key form even when its login brand is an alias.
+      if (capability.quickApiKeySetup && this.options.onApiKey) {
+        const brands = capability.loginOptions?.length
+          ? capability.loginOptions.map((option) => option.brandId)
+          : [capability.provider];
+        for (const id of new Set(brands)) {
+          const group = groups.get(id) ?? { id, label: "", choices: [] };
+          groups.set(id, { ...group, apiKeyProvider: group.apiKeyProvider ?? capability.provider });
+        }
       }
     }
-    return [...choices.values()].toSorted((a, b) => Number(b.featured) - Number(a.featured));
+    for (const group of groups.values()) {
+      group.label ||= providerDisplayLabel(group.id);
+      group.choices.sort(
+        (a, b) =>
+          Number(b.featured) - Number(a.featured) ||
+          a.label.localeCompare(b.label) ||
+          a.id.localeCompare(b.id),
+      );
+    }
+    return [...groups.values()].toSorted(
+      (a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id),
+    );
   }
 
-  open(providers?: string[]): void {
-    if (!this.options.canStart() || this.busy || !this.loginOptions(providers).length) {
+  open(providers?: string[], authChoice?: string): void {
+    const groups = this.loginProviders(providers);
+    if (
+      !this.options.canStart() ||
+      this.busy ||
+      (!groups.length && (providers !== undefined || !this.options.onDiscover))
+    ) {
       return;
     }
-    this.picker = { providers, choice: "" };
+    const provider = authChoice
+      ? groups.find((group) => group.choices.some((option) => option.id === authChoice))
+      : providers && groups.length === 1
+        ? groups[0]
+        : undefined;
+    if (provider?.apiKeyProvider && !provider.choices.length) {
+      this.reset();
+      this.options.onApiKey?.(provider.apiKeyProvider);
+      return;
+    }
+    this.picker = {
+      providers,
+      providerId: provider?.id ?? "",
+      choice:
+        provider?.choices.find((option) => option.id === authChoice)?.id ??
+        (provider?.choices.length === 1 ? provider.choices[0]!.id : ""),
+      query: "",
+    };
+    // The modal owns initial focus and its original trigger. Only in-dialog
+    // transitions move focus here, after the modal has captured that trigger.
+    this.focusPicker = null;
     this.message = undefined;
     this.host.requestUpdate();
   }
@@ -111,6 +191,7 @@ export class ModelProviderLoginController implements ReactiveController {
   reset(): void {
     this.generation += 1;
     this.picker = null;
+    this.focusPicker = null;
     this.mutationActive = false;
     this.cancellationPending = false;
     this.cancellationNotice = null;
@@ -125,64 +206,233 @@ export class ModelProviderLoginController implements ReactiveController {
     this.reset();
   }
 
+  hostUpdated(): void {
+    if (!this.focusPicker || !this.picker) {
+      return;
+    }
+    const target = this.focusPicker === "search" ? this.searchInput.value : this.methodSelect.value;
+    this.focusPicker = null;
+    target?.focus({ preventScroll: true });
+  }
+
   render() {
     const picker = this.picker;
     if (picker) {
-      const choices = this.loginOptions(picker.providers);
-      const selected = choices.find((option) => option.id === picker.choice);
+      const groups = this.loginProviders(picker.providers);
+      const provider = groups.find((group) => group.id === picker.providerId);
+      const selected = provider?.choices.find((option) => option.id === picker.choice);
+      const query = picker.query.trim().toLocaleLowerCase();
+      const matches = groups.filter((group) =>
+        [
+          group.id,
+          group.label,
+          ...(group.apiKeyProvider ? [t("modelProviders.status.apiKey")] : []),
+          ...group.choices.flatMap((choice) => [choice.label, choice.hint ?? ""]),
+        ].some((text) => text.toLocaleLowerCase().includes(query)),
+      );
       return html`
         <openclaw-modal-dialog
           label=${t("modelProviders.login.title")}
           @modal-cancel=${() => this.reset()}
         >
-          <div class="model-setup-wizard">
+          <div class="model-setup-wizard model-provider-login">
             <div class="model-setup-wizard__header">
               <h2>${t("modelProviders.login.title")}</h2>
             </div>
             <div class="model-setup-wizard__body">
               <p>${t("modelProviders.login.description")}</p>
-              <label class="field">
-                <span>${t("modelSetup.manual.provider")}</span>
-                <select
-                  class="settings-select"
-                  data-models-login-choice
-                  .value=${picker.choice}
-                  @change=${(event: Event) => {
-                    // SAFETY: This change handler is attached directly to the select element.
-                    picker.choice = (event.currentTarget as HTMLSelectElement).value;
-                    this.host.requestUpdate();
-                  }}
-                >
-                  <option value="">${t("modelSetup.manual.selectProvider")}</option>
-                  ${choices.map(
-                    (option) => html`
-                      <option value=${option.id}>
-                        ${option.groupLabel ? `${option.groupLabel} · ` : ""}${option.label}
-                      </option>
-                    `,
-                  )}
-                </select>
-              </label>
-              ${selected?.hint ? html`<p class="muted">${selected.hint}</p>` : nothing}
+              ${
+                provider
+                  ? html`
+                      <h3 class="model-provider-login__provider">
+                        ${renderProviderBrandIcon(provider.id)} ${provider.label}
+                      </h3>
+                      <label class="field">
+                        <span>${t("modelProviders.login.method")}</span>
+                        <select
+                          class="settings-select"
+                          data-models-login-choice
+                          autofocus
+                          ${ref(this.methodSelect)}
+                          .value=${picker.choice}
+                          ?disabled=${!this.options.canStart()}
+                          @change=${(event: Event) => {
+                            // SAFETY: This handler is attached directly to the select.
+                            picker.choice = (event.currentTarget as HTMLSelectElement).value;
+                            this.host.requestUpdate();
+                          }}
+                        >
+                          <option value="">${t("modelProviders.login.selectMethod")}</option>
+                          ${provider.choices.map(
+                            (option) =>
+                              html`<option
+                                value=${option.id}
+                                ?selected=${option.id === picker.choice}
+                              >
+                                ${option.label}
+                              </option>`,
+                          )}
+                        </select>
+                      </label>
+                      ${selected?.hint ? html`<p class="muted">${selected.hint}</p>` : nothing}
+                      ${
+                        provider.apiKeyProvider
+                          ? html`
+                              <button
+                                type="button"
+                                class="btn"
+                                data-models-login-api-key
+                                ?disabled=${!this.options.canStart()}
+                                @click=${() => {
+                                  if (
+                                    this.picker !== picker ||
+                                    !provider.apiKeyProvider ||
+                                    !this.options.canStart()
+                                  ) {
+                                    return;
+                                  }
+                                  this.reset();
+                                  this.options.onApiKey?.(provider.apiKeyProvider);
+                                }}
+                              >
+                                ${t("modelProviders.apiKey.set")}
+                              </button>
+                            `
+                          : nothing
+                      }
+                    `
+                  : html`
+                      <label class="field">
+                        <span>${t("modelProviders.search")}</span>
+                        <input
+                          type="search"
+                          data-models-login-search
+                          autofocus
+                          autocomplete="off"
+                          ${ref(this.searchInput)}
+                          .value=${picker.query}
+                          @input=${(event: Event) => {
+                            // SAFETY: This handler is attached directly to the search input.
+                            picker.query = (event.currentTarget as HTMLInputElement).value;
+                            this.host.requestUpdate();
+                          }}
+                        />
+                      </label>
+                      <ul
+                        class="model-provider-login__providers"
+                        aria-label=${t("modelSetup.manual.provider")}
+                      >
+                        ${matches.map(
+                          (group) => html`
+                            <li>
+                              <button
+                                type="button"
+                                class="btn model-provider-login__option"
+                                data-models-login-provider=${group.id}
+                                ?disabled=${!this.options.canStart()}
+                                @click=${() => {
+                                  if (this.picker !== picker || !this.options.canStart()) {
+                                    return;
+                                  }
+                                  if (group.apiKeyProvider && !group.choices.length) {
+                                    this.reset();
+                                    this.options.onApiKey?.(group.apiKeyProvider);
+                                    return;
+                                  }
+                                  picker.providerId = group.id;
+                                  picker.choice =
+                                    group.choices.length === 1 ? group.choices[0]!.id : "";
+                                  this.focusPicker = "method";
+                                  this.host.requestUpdate();
+                                }}
+                              >
+                                ${renderProviderBrandIcon(group.id)}
+                                <span class="model-provider-login__copy">
+                                  <strong>${group.label}</strong>
+                                  <span>
+                                    ${[
+                                      ...group.choices.map((choice) => choice.label),
+                                      ...(group.apiKeyProvider
+                                        ? [t("modelProviders.status.apiKey")]
+                                        : []),
+                                    ].join(" · ")}
+                                  </span>
+                                </span>
+                              </button>
+                            </li>
+                          `,
+                        )}
+                      </ul>
+                      ${
+                        matches.length
+                          ? nothing
+                          : html`
+                              <p class="muted" role="status">
+                                ${t(query ? "modelProviders.noMatches" : "modelProviders.login.noProviders")}
+                              </p>
+                            `
+                      }
+                    `
+              }
             </div>
             <div class="model-setup-wizard__footer">
+              ${
+                provider
+                  ? html`
+                      <button
+                        class="btn model-provider-login__secondary"
+                        data-models-login-back
+                        @click=${() => {
+                          picker.providers = undefined;
+                          picker.providerId = "";
+                          picker.choice = "";
+                          this.focusPicker = "search";
+                          this.host.requestUpdate();
+                        }}
+                      >
+                        ${t("common.back")}
+                      </button>
+                    `
+                  : !picker.providers && this.options.onDiscover
+                    ? html`
+                        <button
+                          class="btn model-provider-login__secondary"
+                          data-models-login-discover
+                          ?disabled=${!this.options.canStart()}
+                          @click=${() => {
+                            if (this.picker !== picker || !this.options.canStart()) {
+                              return;
+                            }
+                            this.reset();
+                            this.options.onDiscover?.();
+                          }}
+                        >
+                          ${t("modelProviders.login.discover")}
+                        </button>
+                      `
+                    : nothing
+              }
               <button class="btn" @click=${() => this.reset()}>${t("common.cancel")}</button>
-              <button
-                class="btn primary"
-                data-models-login-start
-                ?disabled=${!selected || !this.options.canStart()}
-                @click=${() => {
-                  if (!selected || !this.options.canStart()) {
-                    return;
-                  }
-                  this.picker = null;
-                  this.cancellationNotice = null;
-                  this.refreshWarning = null;
-                  void this.run(() => this.runner.start(selected.id, "models.authLogin"));
-                }}
-              >
-                ${t("modelProviders.login.action")}
-              </button>
+              ${
+                provider
+                  ? html`<button
+                      class="btn primary"
+                      data-models-login-start
+                      ?disabled=${!selected || !this.options.canStart()}
+                      @click=${() => {
+                        if (this.picker !== picker || !selected || !this.options.canStart()) {
+                          return;
+                        }
+                        this.picker = null;
+                        this.cancellationNotice = null;
+                        this.refreshWarning = null;
+                        void this.run(() => this.runner.start(selected.id, "models.authLogin"));
+                      }}
+                    >
+                      ${t("modelProviders.login.action")}
+                    </button>`
+                  : nothing
+              }
             </div>
           </div>
         </openclaw-modal-dialog>

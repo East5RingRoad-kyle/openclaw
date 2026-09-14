@@ -78,7 +78,14 @@ describeControlUiE2e("Control UI Models mocked Gateway E2E", () => {
     const page = await context.newPage();
     const config = { auth: { profiles: { "openai:chatgpt": { provider: "openai" } } } };
     const gateway = await installMockGateway(page, {
-      featureMethods: ["chat.metadata", "chat.startup", "models.probe", "openclaw.setup.detect"],
+      featureMethods: [
+        "chat.metadata",
+        "chat.startup",
+        "config.get",
+        "config.patch",
+        "models.probe",
+        "openclaw.setup.detect",
+      ],
       methodResponses: {
         "config.get": {
           config,
@@ -187,8 +194,9 @@ describeControlUiE2e("Control UI Models mocked Gateway E2E", () => {
       ).toHaveLength(0);
       expect(await gateway.getRequests("models.list")).toHaveLength(2);
 
-      await readiness.getByRole("button", { name: "Connect a verified AI model" }).click();
-      await expect.poll(() => new URL(page.url()).pathname).toBe("/settings/model-setup");
+      await readiness.getByRole("button", { name: "Connect provider", exact: true }).click();
+      await page.locator("[data-models-login-search]").waitFor();
+      expect(new URL(page.url()).pathname).toBe("/settings/model-providers");
     } finally {
       await context.close();
     }
@@ -411,14 +419,14 @@ describeControlUiE2e("Control UI Models mocked Gateway E2E", () => {
         if (!heading || !actions || !updated || !refresh || !icon) {
           throw new Error("expected configured-provider header controls");
         }
-        const headingBounds = heading.getBoundingClientRect();
-        const actionsBounds = actions.getBoundingClientRect();
+        const updatedBounds = updated.getBoundingClientRect();
+        const refreshBounds = refresh.getBoundingClientRect();
         const iconBounds = icon.getBoundingClientRect();
         return {
           centerOffset: Math.abs(
-            headingBounds.top +
-              headingBounds.height / 2 -
-              (actionsBounds.top + actionsBounds.height / 2),
+            updatedBounds.top +
+              updatedBounds.height / 2 -
+              (refreshBounds.top + refreshBounds.height / 2),
           ),
           iconWidth: iconBounds.width,
           textSize: Number.parseFloat(getComputedStyle(updated).fontSize),
@@ -713,11 +721,9 @@ describeControlUiE2e("Control UI Models mocked Gateway E2E", () => {
         .poll(() => page.getByRole("status").filter({ hasText: "Defaults saved" }).count())
         .toBeGreaterThan(0);
 
-      const addSection = page.locator(".settings-section", {
-        has: page.getByRole("heading", { name: "Add provider" }),
-      });
-      await addSection.getByRole("button", { name: "Add provider", exact: true }).click();
-      await addSection.getByLabel("Provider").selectOption("google");
+      await page.locator("[data-models-connect]").click();
+      await page.locator('[data-models-login-provider="google"]').click();
+      const addSection = page.locator("[data-models-key-dialog]");
       await addSection.getByLabel("API key").fill(googleInputValue);
       const savedConfig = {
         ...updatedDefaultsConfig,
