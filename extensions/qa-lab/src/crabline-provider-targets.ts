@@ -23,8 +23,9 @@ function resolveMatrixQaConversationId(conversationId: string) {
   if (!trimmed) {
     throw new Error("Matrix QA conversation id must be non-empty");
   }
-  if (trimmed.startsWith("!") && trimmed.includes(":")) {
-    return trimmed;
+  const explicitTarget = normalizeExplicitMatrixTarget(trimmed);
+  if (explicitTarget) {
+    return explicitTarget;
   }
   const digest = createHash("sha256").update(trimmed).digest("hex").slice(0, 16);
   return `!${digest}:${MATRIX_QA_SERVER_NAME}`;

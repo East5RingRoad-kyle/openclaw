@@ -91,8 +91,9 @@ describe("Crabline provider thread routing", () => {
         selection: createSelection("matrix"),
         state: createQaBusState(),
       });
-      const conversationId = "thread-room";
+      const conversationId = "matrix:room:!qa:matrix.test";
       const threadId = "$native-thread:matrix.test";
+      const secondThreadId = "$second-thread:matrix.test";
       try {
         await transport.state.addInboundMessage({
           conversation: { id: conversationId, kind: "group" },
@@ -101,9 +102,10 @@ describe("Crabline provider thread routing", () => {
         });
         await transport.state.reset();
         const delivery = transport.buildAgentDelivery({
-          target: `group:${conversationId}`,
+          target: conversationId,
           threadId,
         });
+        transport.buildAgentDelivery({ target: conversationId, threadId: secondThreadId });
         const roomId = delivery.to.replace(/^room:/u, "");
         const env = transport.createRuntimeEnvPatch?.() ?? {};
         const matrixBaseUrl = requireString(env.MATRIX_BASE_URL, "Matrix base URL");
@@ -120,8 +122,16 @@ describe("Crabline provider thread routing", () => {
         await send("qa-root-send", { body: "matrix root reply", msgtype: "m.text" });
         await expect(
           transport.waitForOutbound({
-            conversation: { id: conversationId, kind: "group" },
+            conversation: { id: conversationId, kind: "direct" },
             threadId,
+            textIncludes: "matrix root reply",
+            timeoutMs: 50,
+          }),
+        ).rejects.toThrow();
+        await expect(
+          transport.waitForOutbound({
+            conversation: { id: conversationId, kind: "direct" },
+            threadId: secondThreadId,
             textIncludes: "matrix root reply",
             timeoutMs: 50,
           }),
@@ -133,12 +143,36 @@ describe("Crabline provider thread routing", () => {
         });
         await expect(
           transport.waitForOutbound({
-            conversation: { id: conversationId, kind: "group" },
+            conversation: { id: conversationId, kind: "direct" },
             threadId,
             textIncludes: "matrix threaded reply",
             timeoutMs: 1_000,
           }),
         ).resolves.toMatchObject({ threadId, text: "matrix threaded reply" });
+        await expect(
+          transport.waitForOutbound({
+            conversation: { id: conversationId, kind: "direct" },
+            threadId: secondThreadId,
+            textIncludes: "matrix threaded reply",
+            timeoutMs: 50,
+          }),
+        ).rejects.toThrow();
+        await send("qa-second-thread-send", {
+          body: "matrix second threaded reply",
+          msgtype: "m.text",
+          "m.relates_to": { rel_type: "m.thread", event_id: secondThreadId },
+        });
+        await expect(
+          transport.waitForOutbound({
+            conversation: { id: conversationId, kind: "direct" },
+            threadId: secondThreadId,
+            textIncludes: "matrix second threaded reply",
+            timeoutMs: 1_000,
+          }),
+        ).resolves.toMatchObject({
+          threadId: secondThreadId,
+          text: "matrix second threaded reply",
+        });
       } finally {
         await transport.cleanupAfterGatewayStop?.();
       }
