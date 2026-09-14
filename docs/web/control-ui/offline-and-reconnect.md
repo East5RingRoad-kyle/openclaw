@@ -57,11 +57,20 @@ automatically when the Gateway returns. Live controls and slash commands remain 
 offline, except that **Stop** can queue an exact local run ID for replay. A session-only stop
 is not replayed because newer work may start in that session before the connection returns.
 
+Editing an unsent queued message remains safe if the connection drops mid-edit.
+If another pane changes or removes that message, the edit stays open: copy your
+correction, cancel the edit, and review the queue before trying again. A full queue
+asks you to wait or remove a message. If browser storage prevents saving an edit,
+keep the tab open and copy the correction before freeing storage. A successful
+save clears the previous error.
+
 Page and sidebar refreshes that fail because the Gateway is suspending, restarting, starting,
 or unreachable show no inline error: the footer connection indicator owns that state. Each panel
 keeps its last data and refreshes automatically once the Gateway accepts work again. Other refresh
 failures remain visible inline with their message and are retried automatically when the Gateway
 becomes available again. These refresh callouts have no manual **Retry** button.
+
+Once the Gateway confirms that a message is in the transcript, reconnecting retires its temporary browser copy even when the original message is outside the latest history page. Loading older history shows the saved message in its original position without adding a second copy.
 
 Queued attachments use binary Blobs in the browser's IndexedDB; the outbox keeps only delivery
 metadata and payload references in session storage. Attachment bytes stay with the queued input;

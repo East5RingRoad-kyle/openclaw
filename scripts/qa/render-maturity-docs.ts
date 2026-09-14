@@ -309,7 +309,7 @@ function validateTaxonomyDocsReferences(
           continue;
         }
         const anchor = redirectAnchor ?? sourceAnchor;
-        const ids = localDocsRouteIds(resolvedRoute, docsRouteIndex);
+        const ids = anchor ? localDocsRouteIds(resolvedRoute, docsRouteIndex) : undefined;
         if (anchor && (!ids || !resolveDocsFragment(`#${anchor}`, ids))) {
           const reason = ids
             ? "targets a missing docs anchor"
