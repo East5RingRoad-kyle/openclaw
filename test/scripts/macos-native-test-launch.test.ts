@@ -341,7 +341,7 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
       const debuggers = calls.filter((call) => call.tool === "lldb");
       expect(debuggers).toHaveLength(1);
       const debuggerArgs = debuggers[0].args;
-      expect(debuggerArgs.slice(0, 10)).toEqual([
+      expect(debuggerArgs.slice(0, 12)).toEqual([
         "--batch",
         "--no-lldbinit",
         "-o",
@@ -349,11 +349,25 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
         "-o",
         'breakpoint set --name exit --name _exit -C "register read x0" -C "thread backtrace all" --auto-continue true',
         "-o",
-        'breakpoint set --name CFRunLoopStop --thread-index 1 -C "register read x0" -C "thread backtrace all" --auto-continue true',
+        'breakpoint set --name CFRunLoopStop --name _CFRunLoopStopMode -C "register read x0 x1" -C "thread backtrace all" --auto-continue true',
+        "-o",
+        "breakpoint set --name CFRunLoopRun --thread-index 1 --one-shot true",
         "-o",
         "run",
       ]);
-      expect(debuggerArgs).toContain("breakpoint list 1 2");
+      expect(debuggerArgs).toContain(
+        "breakpoint set --name CFRunLoopRunSpecific --name _CFRunLoopRunSpecificWithOptions --thread-index 1 --one-shot true",
+      );
+      expect(debuggerArgs).toContain(
+        "thread step-out --run-mode all-threads --step-out-avoids-no-debug false",
+      );
+      expect(debuggerArgs).toContain("register read w0");
+      expect(debuggerArgs).toContain("breakpoint list");
+      expect(debuggerArgs.filter((arg: string) => arg.startsWith("script "))).toEqual([
+        expect.stringContaining("runloop-probe outer_match="),
+        expect.stringContaining("runloop-probe mode_match="),
+        expect.stringContaining("runloop-probe return_match="),
+      ]);
       expect(
         debuggerArgs.slice(
           debuggerArgs.indexOf("--test-bundle-path") + 2,
