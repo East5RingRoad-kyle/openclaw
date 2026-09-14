@@ -297,25 +297,7 @@ async function resolveCardActionChatType(params: {
 }
 
 
-interface FeishuCardButtonElement {
-  tag?: string;
-  behaviors?: { type?: string; value?: unknown }[];
-}
 
-function isQuestionCallbackBehavior(behavior: {
-  type?: string;
-  value?: unknown;
-}): boolean {
-  if (behavior.type !== "callback" || typeof behavior.value !== "string") {
-    return false;
-  }
-  try {
-    const decoded = JSON.parse(behavior.value) as { a?: string } | null;
-    return decoded?.a === "feishu.question.answer";
-  } catch {
-    return false;
-  }
-}
 
 async function disableFeishuQuestionCard(params: {
   cfg: ClawdbotConfig;
@@ -369,16 +351,14 @@ async function disableFeishuQuestionCard(params: {
   const newElements: unknown[] = [];
   let removedQuestionButtons = false;
   for (const element of card.body.elements) {
-    if (element && typeof element === "object" && "tag" in element) {
-      const candidate = element as FeishuCardButtonElement;
-      if (
-        candidate.tag === "button" &&
-        Array.isArray(candidate.behaviors) &&
-        candidate.behaviors.some(isQuestionCallbackBehavior)
-      ) {
-        removedQuestionButtons = true;
-        continue;
-      }
+    if (
+      element &&
+      typeof element === "object" &&
+      "tag" in element &&
+      element.tag === "button"
+    ) {
+      removedQuestionButtons = true;
+      continue;
     }
     newElements.push(element);
   }
