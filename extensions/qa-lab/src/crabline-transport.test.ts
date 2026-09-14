@@ -4,9 +4,10 @@ import path from "node:path";
 import type { OpenClawCrablineChannelDriverSelection } from "@openclaw/crabline";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { withTempDir } from "openclaw/plugin-sdk/test-env";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createQaBusState } from "./bus-state.js";
 import { createQaCrablineTransportAdapter } from "./crabline-transport.js";
+import { startAgentRun } from "./suite-runtime-agent-process.js";
 
 function createSelection(channel: OpenClawCrablineChannelDriverSelection["channel"] = "telegram") {
   return {
@@ -25,6 +26,38 @@ function requireString(value: unknown, label: string): string {
 }
 
 describe("crabline transport", () => {
+  it.each(["matrix", "mattermost"] as const)(
+    "forwards %s threads at the Gateway boundary",
+    async (channel) => {
+      await withTempDir("qa-crabline-transport-", async (outputDir) => {
+        const transport = await createQaCrablineTransportAdapter({
+          outputDir,
+          selection: createSelection(channel),
+          state: createQaBusState(),
+        });
+        const gatewayCall = vi.fn(async () => ({ runId: `run-${channel}` }));
+
+        try {
+          await expect(
+            startAgentRun({ gateway: { call: gatewayCall }, transport } as never, {
+              sessionKey: `agent:qa:${channel}`,
+              message: "thread routing proof",
+              to: "group:qa-channel",
+              threadId: "native-thread",
+            }),
+          ).resolves.toEqual({ runId: `run-${channel}` });
+          expect(gatewayCall).toHaveBeenCalledWith(
+            "agent",
+            expect.objectContaining({ channel, threadId: "native-thread" }),
+            { timeoutMs: 30_000 },
+          );
+        } finally {
+          await transport.cleanupAfterGatewayStop?.();
+        }
+      });
+    },
+  );
+
   it("configures OpenClaw's Telegram plugin against a Crabline local provider server", async () => {
     await withTempDir("qa-crabline-transport-", async (outputDir) => {
       const transport = await createQaCrablineTransportAdapter({
@@ -59,6 +92,11 @@ describe("crabline transport", () => {
         expect(delivery.replyTo).toBe(delivery.to);
         expect(transport.buildAgentDelivery({ target: "dm:alice", threadId: "42" })).toMatchObject({
           threadId: "42",
+        });
+        expect(transport.buildAgentDelivery({ target: "-1001234567890" })).toMatchObject({
+          channel: "telegram",
+          replyTo: "-1001234567890",
+          to: "-1001234567890",
         });
 
         await expect(
@@ -288,6 +326,11 @@ describe("crabline transport", () => {
           SLACK_API_URL: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/api\/$/u),
           SLACK_BOT_TOKEN: "xoxb-crabline-slack-token",
           SLACK_SIGNING_SECRET: "crabline-slack-signing-secret",
+        });
+        expect(transport.buildAgentDelivery({ target: "C1234567890" })).toMatchObject({
+          channel: "slack",
+          replyTo: "C1234567890",
+          to: "C1234567890",
         });
       } finally {
         await transport.cleanupAfterGatewayStop?.();
@@ -591,6 +634,12 @@ describe("crabline transport", () => {
           replyTo: expect.stringMatching(/^channel:[a-z0-9]{26}$/u),
           to: expect.stringMatching(/^channel:[a-z0-9]{26}$/u),
         });
+        expect(
+          transport.buildAgentDelivery({ target: "group:qa-channel", threadId: "post-root" }),
+        ).toMatchObject({
+          channel: "mattermost",
+          threadId: "post-root",
+        });
         expect(mattermostGatewayConfig.channels?.mattermost?.streaming).toEqual({ mode: "off" });
 
         await expect(
@@ -736,6 +785,12 @@ describe("crabline transport", () => {
           replyChannel: "matrix",
           replyTo: "room:!qa:matrix.test",
           to: "room:!qa:matrix.test",
+        });
+        expect(
+          transport.buildAgentDelivery({ target: "group:main", threadId: "$event:matrix.test" }),
+        ).toMatchObject({
+          channel: "matrix",
+          threadId: "$event:matrix.test",
         });
         expect(() => transport.buildAgentDelivery({ target: "group:" })).toThrow(
           "invalid qa-channel group target",

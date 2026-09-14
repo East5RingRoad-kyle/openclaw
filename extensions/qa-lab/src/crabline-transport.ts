@@ -425,13 +425,18 @@ class QaCrablineTransport extends QaStateBackedTransportAdapter {
       conversation: { id: parsed.conversationId, kind: parsed.chatType },
       threadId: threadId ?? parsed.threadId,
     };
+    // Provider-native targets must retain their own classification (for example,
+    // Telegram negative group ids and Slack C/G conversation ids). Matrix and
+    // Mattermost also require OpenClaw to forward threads separately at the
+    // Gateway request boundary instead of passing them into Crabline delivery setup.
+    const providerThreadId =
+      this.#selection.channel === "matrix" || this.#selection.channel === "mattermost"
+        ? undefined
+        : logicalTarget.threadId;
     const { delivery, providerTargetKey } = createCrablineProviderDelivery(
       this.#adapter,
-      buildQaConversationTarget({
-        chatType: logicalTarget.conversation.kind,
-        conversationId: logicalTarget.conversation.id,
-      }),
-      logicalTarget.threadId,
+      target,
+      providerThreadId,
     );
     this.#state.rememberProviderTarget(providerTargetKey, logicalTarget);
     return {
