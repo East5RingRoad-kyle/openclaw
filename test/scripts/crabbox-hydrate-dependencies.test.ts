@@ -144,6 +144,8 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         },
       ).trim();
       const pnpm = resolvePnpmRunner({ npmExecPath });
+      // The setup action prepends NODE_BIN; keep Node and the pinned pnpm runner together.
+      symlinkSync(process.execPath, path.join(bin, "node"));
       write(
         bin,
         "pnpm",
@@ -165,7 +167,7 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         GITHUB_WORKSPACE: workspace,
         GITHUB_ENV: path.join(root, "github-env"),
         RUNNER_TEMP: runnerTemp,
-        NODE_BIN: path.dirname(process.execPath),
+        NODE_BIN: bin,
         DEPENDENCY_CACHE: "false",
         DEPENDENCY_CACHE_HIT: "false",
         FROZEN_LOCKFILE: "true",
