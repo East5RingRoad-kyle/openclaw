@@ -453,48 +453,19 @@ export async function handleFeishuCardAction(params: {
           return;
         }
         try {
-          const result = await questionGatewayRuntime.resolveOption({
+          await questionGatewayRuntime.resolveOption({
             cfg,
             questionId,
             optionValue,
             senderId: event.operator.open_id,
             clientDisplayName: "Feishu question",
           });
-          const feedbackText =
-            result.status === "answered"
-              ? `✅ Answer submitted: ${optionValue}`
-              : "⚠️ This question was already answered or has expired.";
-          const feedbackCardMessageId =
-            event.context.open_message_id ?? event.open_message_id;
-          const feedbackReplyTarget =
-            feedbackCardMessageId &&
-            !feedbackCardMessageId.startsWith("card-action-c-")
-              ? feedbackCardMessageId
-              : undefined;
-          await sendMessageFeishu({
-            cfg,
-            to: resolveCallbackTarget(event),
-            text: feedbackText,
-            accountId,
-            ...feedbackReplyTarget
-              ? {
-                  replyToMessageId: feedbackReplyTarget,
-                  allowTopLevelReplyFallback: true,
-                }
-              : {},
-          }).catch(() => {});
         } catch (err) {
           log(
             `feishu[${account.accountId}]: failed to resolve question answer: ${
               err instanceof Error ? err.message : String(err)
             }`,
           );
-          await sendInvalidInteractionNotice({
-            cfg,
-            event,
-            reason: "stale",
-            accountId,
-          }).catch(() => {});
         }
         completeFeishuCardAction(event.token, account.accountId);
         return;
