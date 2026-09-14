@@ -1,6 +1,7 @@
 // CLI process tests launch real Node+tsx children and must not contend with the
 // shared CLI module graph. Keep the owned list explicit so full and focused runs agree.
 export const cliProcessTestFiles = [
+  "src/cli/plugins-cli.install.test.ts",
   "src/cli/acp-cli-exit.process.test.ts",
   "src/cli/cli-process-child.test-helpers.test.ts",
   "src/cli/completion-cli.runner.process.test.ts",

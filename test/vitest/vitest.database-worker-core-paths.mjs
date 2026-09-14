@@ -1,5 +1,26 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
+  "src/plugins/registry-refresh.test.ts",
+  "src/plugins/installed-plugin-index-store-write.receipt.test.ts",
+  "src/plugins/install-record-commit.retention.test.ts",
+  "src/plugins/management-service.policy-imports.test.ts",
+
+  "src/plugins/installed-plugin-index-generation-precedence.test.ts",
+  "src/plugins/installed-plugin-index-read-state.test.ts",
+  "src/plugins/installed-plugin-index-store.install-record-map.test.ts",
+  "src/plugins/installed-plugin-index-store.test.ts",
+  "src/plugins/install-record-commit.sqlite.test.ts",
+  "src/plugins/management-service.workspace-inventory.test.ts",
+  "src/plugins/manifest-registry-installed.ownership.test.ts",
+  "src/plugins/manifest-registry-installed.test.ts",
+  "src/plugins/plugin-lifecycle-lease.test.ts",
+  "src/plugins/plugin-lifecycle-refusal.test.ts",
+  "src/plugins/plugin-registry-inspection.test.ts",
+  "src/plugins/status.registry-snapshot.test.ts",
+  "src/plugins/status.runtime-inspection.test.ts",
+
+  "src/plugins/plugin-metadata-state-worker.test.ts",
+  "src/plugins/installed-plugin-index-records.test.ts",
   "src/agents/agent-tools.at-prefixed-remote-paths.test.ts",
   "src/agents/agent-tools.create-openclaw-coding-tools.test.ts",
   "src/agents/memory-write-provenance.test.ts",
