@@ -8,6 +8,7 @@ import { afterEach, assert, beforeEach, describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { resolveServiceManagerEnv } from "../../daemon/service-process-env.js";
+import * as sqliteLocation from "../../infra/node-sqlite.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import * as tempRoot from "../../infra/tmp-openclaw-dir.js";
 import { CONTROL_PLANE_UPDATE_SENTINEL_META_ENV } from "../../infra/update-control-plane-sentinel.js";
@@ -18,10 +19,15 @@ import {
 import { createManagedHandoffLeaseStore } from "../../infra/update-managed-service-handoff-lease.js";
 import { MANAGED_HANDOFF_RUNTIME_ENTRY } from "../../infra/update-managed-service-handoff-runtime-assets.js";
 import { stageManagedHandoffRuntime } from "../../infra/update-managed-service-handoff-runtime.js";
+import { createUpdateRun, finishUpdateRun, getUpdateRun } from "../../infra/update-run-ledger.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
+import { renderUpdateRunReport } from "../../infra/update-run-report.js";
+import * as windowsProcess from "../../infra/windows-port-pids.js";
 import { isChildProcessTreeAlive } from "../../process/child-process-tree.js";
 import { runUtf8CommandWithTimeout } from "../../process/exec.js";
+import * as pidAlive from "../../shared/pid-alive.js";
 import { killPidIfAlive, waitForPidToExit } from "../../test-utils/process-tree.js";
+import { withMockedPlatform } from "../../test-utils/vitest-spies.js";
 import { updateExecutorNativeEntrypoints } from "./update-command-executor-native-runtime.test-support.js";
 import {
   captureUpdateCommandExecutorAuthority,
@@ -73,6 +79,65 @@ function replaceOwner(installationRoot = root) {
 }
 
 describe("live update executor", () => {
+  it("finishes an attributed Windows candidate and records its missing start identity warning", async () => {
+    const hostPlatform = process.platform;
+    const existingUri = sqliteLocation.resolveExistingSqliteFileUri;
+    // Keep SQLite on the host VFS while exercising Windows process identity.
+    vi.spyOn(sqliteLocation, "resolveExistingSqliteFileUri").mockImplementation((pathname) =>
+      existingUri(pathname, hostPlatform),
+    );
+    const env = { HOME: root, OPENCLAW_STATE_DIR: root };
+    vi.stubEnv("OPENCLAW_STATE_DIR", root);
+    const run = createUpdateRun({ trigger: "cli" }, { env });
+    const candidatePid = 424242;
+    const argv = [
+      "C:\\node.exe",
+      "C:\\openclaw\\entry.js",
+      "gateway",
+      "install",
+      "--update-executor",
+      "check",
+    ];
+    const readStart = pidAlive.getFileLockProcessStartTime;
+    const isDead = pidAlive.isPidDefinitelyDead;
+    let candidateAlive = true;
+    vi.spyOn(pidAlive, "getFileLockProcessStartTime").mockImplementation((pid, ...args) =>
+      pid === candidatePid ? null : readStart(pid, ...args),
+    );
+    vi.spyOn(pidAlive, "isPidDefinitelyDead").mockImplementation((pid) =>
+      pid === candidatePid ? !candidateAlive : isDead(pid),
+    );
+    vi.spyOn(windowsProcess, "readWindowsProcessArgsSync").mockReturnValue(argv);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await withUpdateCommandExecutor(run.runId, async (executor) => {
+      const fence = await executor.enter(root);
+      await withMockedPlatform("win32", () =>
+        withUpdateCommandExecutorChild(fence, root, async (_grant, bindChild) => {
+          try {
+            bindChild(candidatePid, argv);
+          } finally {
+            candidateAlive = false;
+          }
+        }),
+      );
+      fence.assertCurrent();
+    });
+    finishUpdateRun(run.runId, { status: "succeeded" }, { env });
+    const recorded = getUpdateRun(run.runId, { env });
+    assert(recorded);
+    expect(recorded.status).toBe("succeeded");
+    expect(recorded.steps).toContainEqual(
+      expect.objectContaining({
+        step: `warning:process-start-identity:${candidatePid}`,
+        status: "completed",
+        detail: expect.stringContaining("launcher attribution"),
+      }),
+    );
+    expect(renderUpdateRunReport(recorded).markdown).toContain("launcher attribution");
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(String(candidatePid)));
+    expect(createManagedHandoffLeaseStore().read(root)).toEqual({ kind: "absent" });
+  });
+
   it("recovery acquires a fresh owner without reactivating the original fence", async () => {
     const store = createManagedHandoffLeaseStore();
     const runId = randomUUID();

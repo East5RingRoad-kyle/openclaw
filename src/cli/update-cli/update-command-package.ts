@@ -163,7 +163,10 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
   const configSnapshot = params.onConfigSnapshot
     ? await readUpdateConfigSnapshot(resolveConfigPath(doctorEnv))
     : undefined;
-  const runDoctor = (executor?: UpdateCommandChildGrant, beforeInput?: (pid: number) => void) => {
+  const runDoctor = (
+    executor?: UpdateCommandChildGrant,
+    beforeInput?: (pid: number, argv?: readonly string[]) => void,
+  ) => {
     context?.assertRequesterCurrent();
     const input: UpdateDoctorInput | undefined =
       context && executor
@@ -213,9 +216,9 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
   };
   const doctorStep = context
     ? await withUpdateCommandExecutorChild(context.executorFence, params.root, (grant, bindChild) =>
-        runDoctor(grant, (pid) => {
+        runDoctor(grant, (pid, argv) => {
           context.assertRequesterCurrent();
-          bindChild(pid);
+          bindChild(pid, argv);
         }),
       )
     : await runDoctor();
