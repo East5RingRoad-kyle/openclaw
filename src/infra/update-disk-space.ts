@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { resolveConfigPath, resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { runCommandWithTimeout } from "../process/exec.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { resolveBunGlobalInstallOwner } from "./detect-package-manager.js";
 import { formatDiskSpaceBytes, tryReadDiskSpace } from "./disk-space.js";
@@ -14,7 +15,8 @@ import {
   type ResolvedGlobalInstallTarget,
 } from "./update-global.js";
 import { resolveGitPreflightBaseDir } from "./update-runner-git-preflight.js";
-import type { UpdateStepResult } from "./update-runner-types.js";
+import { measureGitUpdateFiles } from "./update-runner-git-runtime.js";
+import type { UpdateRunnerOptions, UpdateStepResult } from "./update-runner-types.js";
 
 export const UPDATE_DISK_SPACE_FAILURE_REASON = "insufficient-disk-space";
 
@@ -29,13 +31,10 @@ type Volume = {
   requiredBytes: number;
 };
 
-async function measureInstallBytes(
-  root: string,
-  git: boolean,
-): Promise<{ bytes: number; incomplete: boolean }> {
+async function measureInstallBytes(root: string): Promise<{ bytes: number; incomplete: boolean }> {
   const directories = new Set<string>();
   let incomplete = false;
-  async function visit(file: string, top = false): Promise<number> {
+  async function visit(file: string): Promise<number> {
     try {
       const actual = await fs.realpath(file);
       const stat = await fs.stat(actual);
@@ -48,9 +47,6 @@ async function measureInstallBytes(
       directories.add(actual);
       let bytes = 4096;
       for (const entry of await fs.readdir(actual, { withFileTypes: true })) {
-        if (git && top && (entry.name === ".git" || entry.name === ".artifacts")) {
-          continue;
-        }
         bytes += await visit(path.join(actual, entry.name));
       }
       return bytes;
@@ -59,7 +55,7 @@ async function measureInstallBytes(
       return 0;
     }
   }
-  return { bytes: await visit(root, true), incomplete };
+  return { bytes: await visit(root), incomplete };
 }
 
 function formatCapacityBytes(bytes: number): string {
@@ -77,6 +73,9 @@ export async function assessUpdateDiskSpace(params: {
   root: string;
   installTarget?: ResolvedGlobalInstallTarget;
   gitRoot?: string;
+  sourceGitRoot?: string;
+  gitTarget?: Parameters<NonNullable<UpdateRunnerOptions["beforeGitStaging"]>>[0];
+  timeoutMs?: number;
   config: OpenClawConfig;
   env: NodeJS.ProcessEnv;
 }): Promise<UpdateStepResult> {
@@ -121,8 +120,8 @@ export async function assessUpdateDiskSpace(params: {
       volume.requiredBytes += bytes;
     }
   };
-  const measure = async (root: string, git = false) => {
-    const measured = await measureInstallBytes(root, git);
+  const measure = async (root: string) => {
+    const measured = await measureInstallBytes(root);
     if (measured.incomplete) {
       warnings.push(
         `The installation size at ${root} could not be fully measured; continuing with the measured files as an incomplete estimate.`,
@@ -147,7 +146,36 @@ export async function assessUpdateDiskSpace(params: {
   charge(`${configPath}.pre-update`, configBytes);
 
   const installRoot = params.installTarget?.packageRoot ?? params.gitRoot ?? params.root;
-  const packageBytes = await measure(installRoot, Boolean(params.gitRoot));
+  const sourceGitRoot =
+    params.sourceGitRoot ??
+    (await fs
+      .realpath(installRoot)
+      .then(
+        async (root) =>
+          await fs.lstat(path.join(root, ".git")).then(
+            () => root,
+            () => undefined,
+          ),
+      )
+      .catch(() => undefined));
+  const gitSize = sourceGitRoot
+    ? await measureGitUpdateFiles({
+        root: sourceGitRoot,
+        sourceRoot: params.gitTarget?.sourceRoot,
+        revision: params.gitTarget?.revision,
+        runCommand: params.gitTarget?.runCommand ?? runCommandWithTimeout,
+        timeoutMs: params.timeoutMs ?? 30_000,
+      }).catch(() => undefined)
+    : undefined;
+  if (sourceGitRoot && (!gitSize || gitSize.incomplete)) {
+    warnings.push(
+      "Git checkout or runtime sizes could not be fully measured; continuing with the measured files as an incomplete estimate.",
+    );
+  }
+  const runtimeBytes = gitSize?.runtime.reduce((bytes, entry) => bytes + entry.bytes, 0) ?? 0;
+  const packageBytes = sourceGitRoot
+    ? (gitSize?.sourceBytes ?? 0) + runtimeBytes
+    : await measure(installRoot);
   const target = params.installTarget;
   if (target?.manager === "npm") {
     const layout = resolveNpmGlobalPrefixLayoutFromGlobalRoot(target.globalRoot, {
@@ -182,10 +210,26 @@ export async function assessUpdateDiskSpace(params: {
   }
   if (params.gitRoot || !target) {
     const gitRoot = params.gitRoot ?? params.root;
-    const gitBytes = gitRoot === installRoot ? packageBytes : await measure(gitRoot, true);
-    charge(gitRoot, gitBytes);
-    const stageRoot = resolveGitPreflightBaseDir(resolvePathViaExistingAncestorSync(gitRoot));
-    charge(stageRoot, gitBytes);
+    charge(gitRoot, 0);
+    const stageRoot =
+      params.gitTarget?.stagingRoot ??
+      resolveGitPreflightBaseDir(resolvePathViaExistingAncestorSync(gitRoot));
+    if (gitSize) {
+      charge(stageRoot, gitSize.sourceBytes + runtimeBytes);
+      const sourceVolume = probe(gitRoot);
+      const stageVolume = probe(stageRoot);
+      // Candidate source is removed before activation; separate volumes cannot share that space.
+      if (sourceVolume && stageVolume && sourceVolume.deviceId !== stageVolume.deviceId) {
+        charge(gitRoot, gitSize.sourceBytes);
+      }
+      for (const runtime of gitSize.runtime) {
+        charge(path.dirname(path.join(gitRoot, runtime.relative)), runtime.bytes);
+      }
+    } else if (!sourceGitRoot) {
+      // Before a package-to-Git clone exists, its installed package is the available estimate.
+      charge(gitRoot, packageBytes);
+      charge(stageRoot, packageBytes);
+    }
   }
   charge(
     params.env.TMPDIR?.trim() || params.env.TMP?.trim() || params.env.TEMP?.trim() || os.tmpdir(),

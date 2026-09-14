@@ -499,19 +499,26 @@ export async function updateGitInstall(params: {
     };
   }
 
-  const capacity = await preflightUpdateInstallCapacity({
-    root: params.root,
-    gitRoot: updateRoot,
-    installTarget: installTarget ?? undefined,
-    env: resolveUpdateTargetEnv({
-      baseEnv: installEnv,
-      serviceEnv: params.getManagedServiceEnv() ?? params.capacityEnv,
-      invocationCwd: params.invocationCwd,
-    }),
-    progress: params.progress,
-    jsonMode: params.jsonMode === true,
-  });
-  if (capacity.exitCode !== 0) {
+  const checkCapacity = (
+    gitTarget?: Parameters<NonNullable<UpdateRunnerOptions["beforeGitStaging"]>>[0],
+  ) =>
+    preflightUpdateInstallCapacity({
+      root: params.root,
+      gitRoot: updateRoot,
+      sourceGitRoot: params.switchToGit ? undefined : params.root,
+      gitTarget,
+      timeoutMs: effectiveTimeout,
+      installTarget: installTarget ?? undefined,
+      env: resolveUpdateTargetEnv({
+        baseEnv: installEnv,
+        serviceEnv: params.getManagedServiceEnv() ?? params.capacityEnv,
+        invocationCwd: params.invocationCwd,
+      }),
+      progress: params.progress,
+      jsonMode: params.jsonMode === true,
+    });
+  const capacity = params.switchToGit ? await checkCapacity() : undefined;
+  if (capacity && capacity.exitCode !== 0) {
     return {
       status: "error",
       mode: "git",
@@ -543,6 +550,12 @@ export async function updateGitInstall(params: {
       allowGatewayActivation: params.allowGatewayActivation,
       beforeGitMutation: params.beforeGitMutation,
       inspectGitTarget: params.inspectGitTarget,
+      beforeGitStaging: params.switchToGit
+        ? undefined
+        : async (target) => ({
+            step: await checkCapacity(target),
+            failureReason: UPDATE_DISK_SPACE_FAILURE_REASON,
+          }),
       publishGitCheckout,
       validateCandidate: params.validateCandidate,
       runGitDoctor: installTarget
@@ -618,14 +631,18 @@ export async function updateGitInstall(params: {
         recovery: await (params.installKind === "git"
           ? readCurrentGitUpdateRecovery(params.root, effectiveTimeout)
           : verifyPackageUpdateRecovery(params.root)),
-        steps: [capacity, cloneStep],
+        steps: [...(capacity ? [capacity] : []), cloneStep],
         durationMs: Date.now() - params.startedAt,
       };
     }
 
     const updateResult = stagedUpdateResult ?? (await runUpdate(updateRoot));
     const before = previousPackage ?? updateResult.before;
-    const steps = [capacity, ...(cloneStep ? [cloneStep] : []), ...updateResult.steps];
+    const steps = [
+      ...(capacity ? [capacity] : []),
+      ...(cloneStep ? [cloneStep] : []),
+      ...updateResult.steps,
+    ];
     if (exposure && updateResult.status === "ok") {
       const packageUpdate = await exposure.activate();
       return {

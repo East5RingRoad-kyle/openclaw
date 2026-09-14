@@ -57,6 +57,105 @@ async function collectRuntimeDirectories(
   );
 }
 
+/** Size the checkout and the same generated roots that runtime promotion copies. */
+export async function measureGitUpdateFiles(params: {
+  root: string;
+  sourceRoot?: string;
+  revision?: string;
+  runCommand: CommandRunner;
+  timeoutMs: number;
+}): Promise<{
+  sourceBytes: number;
+  runtime: Array<{ relative: string; bytes: number }>;
+  incomplete: boolean;
+}> {
+  let incomplete = false;
+  let sourceBytes = 4096;
+  const sourceRoot = params.sourceRoot ?? params.root;
+  try {
+    const source = await params.runCommand(
+      ["git", "-C", sourceRoot, "ls-tree", "-r", "-t", "-l", "-z", params.revision ?? "HEAD"],
+      {
+        cwd: sourceRoot,
+        timeoutMs: params.timeoutMs,
+        env: { GIT_NO_LAZY_FETCH: "1", GIT_OPTIONAL_LOCKS: "0" },
+      },
+    );
+    if (source.code !== 0) {
+      incomplete = true;
+    } else {
+      for (const entry of source.stdout.split("\0").filter(Boolean)) {
+        const header = /^\d+ (blob|tree|commit) [0-9a-f]+ +([0-9]+|-)\t/u.exec(entry);
+        if (!header || (header[1] === "blob" && header[2] === "-")) {
+          incomplete = true;
+          continue;
+        }
+        sourceBytes += Math.max(
+          4096,
+          Math.ceil(Number(header[2] === "-" ? 0 : header[2]) / 4096) * 4096,
+        );
+      }
+    }
+  } catch {
+    incomplete = true;
+  }
+  const root = await fs.realpath(params.root);
+  const directories = await collectRuntimeDirectories(
+    root,
+    params.runCommand,
+    params.timeoutMs,
+  ).catch(() => {
+    incomplete = true;
+    return [];
+  });
+  const roots = new Set(directories.map((relative) => path.join(root, relative)));
+  for (const relative of directories) {
+    if (path.basename(relative) !== "node_modules") {
+      continue;
+    }
+    try {
+      const modules = path.join(root, relative);
+      const contents = await readRuntimeModulesManifest(path.join(modules, ".modules.yaml"));
+      const virtualStoreDir = contents?.manifest.virtualStoreDir;
+      if (typeof virtualStoreDir === "string") {
+        const store = path.resolve(modules, virtualStoreDir);
+        const entry = path.join(await fs.realpath(path.dirname(store)), path.basename(store));
+        if (entry !== root && isPathInside(root, entry)) {
+          roots.add(entry);
+        } else {
+          incomplete = true;
+        }
+      }
+    } catch {
+      incomplete = true;
+    }
+  }
+  async function measure(file: string): Promise<number> {
+    try {
+      // Promotion preserves links; a link's external payload is not a copied tree.
+      const stat = await fs.lstat(file);
+      if (!stat.isDirectory()) {
+        return Math.max(4096, Math.ceil(stat.size / 4096) * 4096);
+      }
+      let bytes = 4096;
+      for (const entry of await fs.readdir(file)) {
+        bytes += await measure(path.join(file, entry));
+      }
+      return bytes;
+    } catch {
+      incomplete = true;
+      return 0;
+    }
+  }
+  const runtime: Array<{ relative: string; bytes: number }> = [];
+  for (const source of roots) {
+    if (![...roots].some((other) => other !== source && isPathInside(other, source))) {
+      runtime.push({ relative: path.relative(root, source), bytes: await measure(source) });
+    }
+  }
+  return { sourceBytes, runtime, incomplete };
+}
+
 /** Stage on the destination filesystem; activation only renames the already validated runtime. */
 export async function prepareGitRuntimePromotion(
   root: string,
