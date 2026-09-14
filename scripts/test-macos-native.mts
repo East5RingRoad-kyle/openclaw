@@ -88,12 +88,22 @@ await runWithFailedTrailer("macos-native", async () => {
     for (const dir of [path.dirname(keychain), path.join(home, "Library/Preferences")]) {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     }
-    const run = async (bin: string, commandArgs: string[], timeoutMs?: number) => {
+    const run = async (
+      bin: string,
+      commandArgs: string[],
+      timeoutMs?: number,
+      output?: Buffer[],
+      commandEnv = childEnv,
+    ) => {
       canRemove = false;
       const code = await runManagedCommand({
         bin,
         args: commandArgs,
-        env: childEnv,
+        env: commandEnv,
+        stdio: output ? ["inherit", "pipe", "inherit"] : "inherit",
+        onReady: output
+          ? (child) => child.stdout?.on("data", (chunk: Buffer) => output.push(chunk))
+          : undefined,
         requireProcessTreeExit: true,
         timeoutMs,
       });
@@ -116,7 +126,150 @@ await runWithFailedTrailer("macos-native", async () => {
           return;
         }
       }
-      process.exitCode = await run("swift", ["test", ...args]);
+      const eventStreamPath = path.join(root, "swift-testing-events.jsonl");
+      process.exitCode = await run("swift", [
+        "test",
+        ...args,
+        "--event-stream-output-path",
+        eventStreamPath,
+        "--event-stream-version",
+        "6.3",
+      ]);
+      if (process.exitCode === 0) {
+        try {
+          let phase: "pending" | "running" | "ended" = "pending";
+          const lines = fs.readFileSync(eventStreamPath, "utf8").split("\n");
+          if (lines.at(-1) === "") {
+            lines.pop();
+          }
+          for (const line of lines) {
+            const record: unknown = JSON.parse(line);
+            if (typeof record !== "object" || record === null || !("kind" in record)) {
+              throw new Error("Invalid Swift Testing event record");
+            }
+            // Swift Testing permits new record and event kinds without a schema change.
+            if (record.kind !== "event" && record.kind !== "test") {
+              continue;
+            }
+            if (!("version" in record) || record.version !== "6.3.0") {
+              throw new Error("Expected Swift Testing event schema 6.3.0");
+            }
+            if (record.kind !== "event") {
+              continue;
+            }
+            if (
+              !("payload" in record) ||
+              typeof record.payload !== "object" ||
+              record.payload === null ||
+              !("kind" in record.payload) ||
+              typeof record.payload.kind !== "string"
+            ) {
+              throw new Error("Invalid Swift Testing event payload");
+            }
+            if (record.payload.kind === "runStarted") {
+              if (phase !== "pending") {
+                throw new Error("Unexpected Swift Testing runStarted");
+              }
+              phase = "running";
+            } else if (record.payload.kind === "runEnded") {
+              if (phase !== "running") {
+                throw new Error("Unexpected Swift Testing runEnded");
+              }
+              phase = "ended";
+            }
+          }
+          if (phase !== "ended") {
+            throw new Error("Swift Testing did not finish its run");
+          }
+        } catch (error) {
+          process.exitCode = 1;
+          console.error("[macos-native] Swift exited 0 without valid test completion", error);
+        }
+        // Temporary named-run exit probe; remove once the early exit is attributed.
+        if (process.exitCode === 1 && profileMode === "named") {
+          try {
+            const xcodePaths = { swift: "", lldb: "", platform: "" };
+            for (const [name, query] of [
+              ["swift", ["--find", "swift"]],
+              ["lldb", ["--find", "lldb"]],
+              ["platform", ["--sdk", "macosx", "--show-sdk-platform-path"]],
+            ] as const) {
+              const output: Buffer[] = [];
+              const code = await run("xcrun", [...query], 30_000, output);
+              const resolved = Buffer.concat(output).toString("utf8").trim();
+              if (code !== 0 || !path.isAbsolute(resolved)) {
+                throw new Error(`Could not resolve selected Xcode ${name} (exit ${code})`);
+              }
+              xcodePaths[name] = resolved;
+            }
+            const buildPath = path.resolve("apps/macos/.build/debug");
+            const platformDeveloper = path.join(xcodePaths.platform, "Developer");
+            const diagnosticEnv = {
+              ...childEnv,
+              DYLD_FRAMEWORK_PATH: [
+                childEnv.DYLD_FRAMEWORK_PATH,
+                path.join(platformDeveloper, "Library/Frameworks"),
+                path.join(platformDeveloper, "Library/PrivateFrameworks"),
+              ]
+                .filter(Boolean)
+                .join(":"),
+              DYLD_LIBRARY_PATH: [
+                childEnv.DYLD_LIBRARY_PATH,
+                buildPath,
+                path.join(platformDeveloper, "usr/lib"),
+              ]
+                .filter(Boolean)
+                .join(":"),
+              LLVM_PROFILE_FILE: path.join(root, "named-diagnostic-%m.%p.profraw"),
+            };
+            const diagnosticCode = await run(
+              xcodePaths.lldb,
+              [
+                "--batch",
+                "--no-lldbinit",
+                "-o",
+                "breakpoint set --name exit --name _exit",
+                "-o",
+                'breakpoint modify -C "register read x0" -C "thread backtrace all" 1',
+                "-o",
+                "breakpoint modify --auto-continue true 1",
+                "-o",
+                "run",
+                "-o",
+                "process status",
+                "-o",
+                "breakpoint list 1",
+                "-k",
+                "thread backtrace all",
+                "--",
+                path.resolve(
+                  path.dirname(xcodePaths.swift),
+                  "../libexec/swift/pm/swiftpm-testing-helper",
+                ),
+                "--test-bundle-path",
+                path.join(
+                  buildPath,
+                  "OpenClawPackageTests.xctest/Contents/MacOS/OpenClawPackageTests",
+                ),
+                ...args,
+                "--testing-library",
+                "swift-testing",
+              ],
+              120_000,
+              undefined,
+              diagnosticEnv,
+            );
+            console.error(
+              `[macos-native] Named exit diagnostic exited ${diagnosticCode}; preserving completion failure`,
+            );
+          } catch (diagnosticError) {
+            console.error(
+              "[macos-native] Named exit diagnostic failed; preserving completion failure",
+              diagnosticError,
+            );
+          }
+        }
+      }
     } finally {
       // A completed failed create may leave a database. Never delete it until every child closed.
       if (canRemove && fs.existsSync(keychain)) {

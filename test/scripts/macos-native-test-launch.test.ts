@@ -14,21 +14,40 @@ const swiftStep = workflow.jobs["macos-swift"].steps.find(
   (step: { name?: string }) => step.name === "Swift test",
 ).run as string;
 
+function eventStream(...kinds: string[]) {
+  return (
+    kinds
+      .map((kind) =>
+        JSON.stringify({
+          version: "6.3.0",
+          kind: "event",
+          payload: { kind, instant: { absolute: 0, since1970: 0 }, messages: [] },
+        }),
+      )
+      .join("\n") + "\n"
+  );
+}
+
 function fixture(
   defaultExitCode = 0,
   waitForSignal: false | "swift" | "security" = false,
   namedExitCode = 0,
   securityFailure = "",
   logicalCpu = "3",
+  eventReport: string | null = eventStream("runStarted", "runEnded"),
 ) {
   const root = temps.make("native-launch-");
   const bin = path.join(root, "bin");
   const home = path.join(root, "ambient-home");
   const runnerTemp = path.join(root, "runner-temp");
+  const platform = path.join(root, "MacOSX.platform");
+  const testingHelper = path.join(root, "libexec/swift/pm/swiftpm-testing-helper");
   const log = path.join(root, "calls.jsonl");
   for (const dir of [bin, home, runnerTemp]) {
     fs.mkdirSync(dir);
   }
+  fs.mkdirSync(platform);
+  fs.mkdirSync(path.dirname(testingHelper), { recursive: true });
   const cache = path.join(home, "Library/Caches/org.swift.swiftpm");
   fs.mkdirSync(cache, { recursive: true });
   fs.writeFileSync(path.join(cache, "fixture-cache"), "reusable build cache");
@@ -93,7 +112,37 @@ if (tool === 'sysctl') {
 if (tool === 'rg') console.log('apps/macos/Sources/Fixture.swift');
 if (tool === 'git' && args[0] === 'rev-parse' && args[1] === '--show-toplevel') console.log(${JSON.stringify(root)});
 if (tool === 'git' && args[0] === 'diff' && args.includes('--name-only')) console.log('apps/macos/Sources/Fixture.swift');
+if (tool === 'xcrun') {
+  if (args[0] === '--find') {
+    assert.equal(args.length, 2);
+    assert.ok(['swift', 'lldb'].includes(args[1]));
+    console.log(path.join(${JSON.stringify(bin)}, args[1]));
+  } else {
+    assert.deepEqual(args, ['--sdk', 'macosx', '--show-sdk-platform-path']);
+    console.log(${JSON.stringify(platform)});
+  }
+}
+if (tool === 'lldb') {
+  assert.ok(args.includes(${JSON.stringify(testingHelper)}));
+  assert.ok(args.includes('--batch') && args.includes('--no-lldbinit'));
+  assert.equal(args[args.indexOf('--testing-library') + 1], 'swift-testing');
+  assert.equal(args[args.indexOf('--filter') + 1], 'AppStateIsolationTests');
+  assert.equal(args[args.indexOf('--test-bundle-path') + 1], ${JSON.stringify(path.join(repo, "apps/macos/.build/debug/OpenClawPackageTests.xctest/Contents/MacOS/OpenClawPackageTests"))});
+  console.log('fake-named-exit-backtrace');
+}
+if (tool === 'swiftpm-testing-helper' || tool === 'xctest') {
+  throw new Error('The fixture native target must only be a fake debugger argument');
+}
 if (tool === 'swift' && args[0] === 'test') {
+  const eventPathIndex = args.indexOf('--event-stream-output-path');
+  if (eventPathIndex !== -1) {
+    const eventPath = args[eventPathIndex + 1];
+    assert.ok(path.isAbsolute(eventPath));
+    assert.ok(eventPath.startsWith(path.dirname(env.HOME) + path.sep));
+    assert.equal(args[args.indexOf('--event-stream-version') + 1], '6.3');
+    const eventReport = ${JSON.stringify(eventReport)};
+    if (eventReport !== null) fs.writeFileSync(eventPath, eventReport);
+  }
   if (env.OPENCLAW_STATE_DIR !== ${JSON.stringify(path.join(root, "ambient-state"))}) {
     fs.writeFileSync(path.join(env.OPENCLAW_STATE_DIR, 'child-owned'), 'fixture');
   }
@@ -101,13 +150,26 @@ if (tool === 'swift' && args[0] === 'test') {
   else process.exit(env.OPENCLAW_PROFILE === 'default' ? ${defaultExitCode} : ${namedExitCode});
 }
 `;
-  for (const tool of ["security", "swift", "pnpm", "node", "git", "uname", "sysctl", "rg"]) {
+  for (const tool of [
+    "security",
+    "swift",
+    "pnpm",
+    "node",
+    "git",
+    "uname",
+    "sysctl",
+    "rg",
+    "xcrun",
+    "lldb",
+    "xctest",
+  ]) {
     if (tool === "node") {
       fs.symlinkSync(process.execPath, path.join(bin, tool));
     } else {
       fs.writeFileSync(path.join(bin, tool), fake, { mode: 0o755 });
     }
   }
+  fs.writeFileSync(testingHelper, fake, { mode: 0o755 });
   const env = {
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
@@ -205,6 +267,10 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
           expectedWidth,
           index === 0 ? "--skip" : "--filter",
           "AppStateIsolationTests",
+          "--event-stream-output-path",
+          expect.any(String),
+          "--event-stream-version",
+          "6.3",
         ]);
         if (index === 0) {
           expect(test.env.OPENCLAW_PROFILE).toBe("default");
@@ -256,6 +322,74 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
     },
   );
 
+  it.each([
+    { report: "missing", contents: null },
+    { report: "incomplete", contents: eventStream("runStarted") },
+  ])("rejects zero exit with $report Swift Testing completion", ({ report, contents }) => {
+    const f = fixture(0, false, 0, "", "3", contents);
+    const result = f.run(
+      "node scripts/test-macos-native.mts named --package-path apps/macos --build-system native --enable-code-coverage --skip-build --experimental-maximum-parallelization-width 3 --filter AppStateIsolationTests",
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain("[macos-native] FAILED (exit 1)");
+    const calls = f.calls();
+    const test = calls.find((call) => call.tool === "swift");
+    expect(calls.filter((call) => call.tool === "swift")).toHaveLength(1);
+    if (report === "incomplete") {
+      expect(result.stdout).toContain("fake-named-exit-backtrace");
+      const debuggers = calls.filter((call) => call.tool === "lldb");
+      expect(debuggers).toHaveLength(1);
+      const debuggerArgs = debuggers[0].args;
+      expect(
+        debuggerArgs.slice(
+          debuggerArgs.indexOf("--test-bundle-path") + 2,
+          debuggerArgs.indexOf("--testing-library"),
+        ),
+      ).toEqual(test.args.slice(1, -4));
+    }
+    expect(
+      calls.some((call) => call.tool === "swiftpm-testing-helper" || call.tool === "xctest"),
+    ).toBe(false);
+    for (const call of calls.filter((entry) => entry.tool === "xcrun" || entry.tool === "lldb")) {
+      expect(call.env.HOME).toBe(test.env.HOME);
+      expect(call.env.OPENCLAW_PROFILE).toBe(test.env.OPENCLAW_PROFILE);
+      expect(call.env.OPENCLAW_STATE_DIR).toBe(test.env.OPENCLAW_STATE_DIR);
+      expect(call.env.OPENCLAW_GATEWAY_TOKEN).toBeUndefined();
+      expect(call.keychain).toEqual({ locked: false, autoLock: false });
+      expect(call.present.HOME).toBe(true);
+      expect(call.present.OPENCLAW_STATE_DIR).toBe(true);
+    }
+    expect(calls.at(-1).args).toEqual(["delete-keychain", test.settings.default]);
+    expect(fs.existsSync(path.dirname(test.env.HOME))).toBe(false);
+  });
+
+  it.each([
+    { report: "malformed JSON", contents: eventStream("runStarted") + "{\n", expected: 1 },
+    { report: "missing start", contents: eventStream("runEnded"), expected: 1 },
+    { report: "reversed lifecycle", contents: eventStream("runEnded", "runStarted"), expected: 1 },
+    {
+      report: "unsupported schema",
+      contents: eventStream("runStarted", "runEnded").replaceAll('"6.3.0"', '"0.0.0"'),
+      expected: 1,
+    },
+    {
+      report: "unknown record and event kinds",
+      contents:
+        JSON.stringify({ version: "6.3.0", kind: "futureRecord", payload: null }) +
+        "\n" +
+        eventStream("runStarted", "futureEvent", "runEnded"),
+      expected: 0,
+    },
+  ])("validates $report without counting tests", ({ contents, expected }) => {
+    const f = fixture(0, false, 0, "", "3", contents);
+    const result = f.run("node scripts/test-macos-native.mts default --skip-build");
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(expected);
+    expect(f.calls().some((call) => call.tool === "lldb")).toBe(false);
+    expect(fs.existsSync(path.dirname(f.calls()[0].env.HOME))).toBe(false);
+  });
+
   it("fails closed when logical CPU detection is invalid", () => {
     const f = fixture(0, false, 0, "", "not-a-count");
     const result = f.run(swiftStep);
@@ -274,6 +408,11 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
     expect(calls).toHaveLength(2);
     expect(calls[0].env.OPENCLAW_PROFILE).not.toBe(calls[1].env.OPENCLAW_PROFILE);
     expect(calls[0].env.HOME).not.toBe(calls[1].env.HOME);
+    const eventPaths = calls.map(
+      (call) => call.args[call.args.indexOf("--event-stream-output-path") + 1],
+    );
+    expect(eventPaths.every((eventPath) => path.isAbsolute(eventPath))).toBe(true);
+    expect(eventPaths[0]).not.toBe(eventPaths[1]);
   });
 
   it.each([
@@ -366,6 +505,9 @@ process.send('ready');
     fs.writeFileSync(
       path.join(f.root, "bin/swift"),
       `#!${process.execPath}
+const fs = require('node:fs');
+const eventPathIndex = process.argv.indexOf('--event-stream-output-path');
+if (eventPathIndex !== -1) fs.writeFileSync(process.argv[eventPathIndex + 1], ${JSON.stringify(eventStream("runStarted", "runEnded"))});
 const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(leaf)}], {detached: true, stdio: ['ignore', 'inherit', 'inherit', 'ipc']});
 child.once('message', () => process.exit(0));
 `,
