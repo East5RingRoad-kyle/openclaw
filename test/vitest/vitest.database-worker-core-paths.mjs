@@ -6,6 +6,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/memory-write-provenance.test.ts",
   "src/agents/prepared-model-runtime.run-resources.test.ts",
   "src/commands/doctor-maintenance.worker.test.ts",
+  "src/entry.memory-json.test.ts",
   "src/gateway/server-methods/memory-search.test.ts",
   "src/memory/memory-artifact-provenance.test.ts",
   "src/plugin-sdk/memory-host-core.test.ts",
