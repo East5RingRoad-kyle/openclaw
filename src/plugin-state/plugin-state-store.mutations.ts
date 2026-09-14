@@ -7,6 +7,7 @@ import {
   deletePluginStateEntry,
   enforcePostRegisterLimits,
   getPluginStateKysely,
+  hasPluginStateEntry,
   insertPluginStateEntryIfAbsent,
   parseStoredJson,
   resolvePluginStateExpiresAtMs,
@@ -42,7 +43,7 @@ export function registerPluginStateEntryIfAbsent(
     path: store.path,
   });
   deleteExpiredPluginStateEntries(store.db, now, params);
-  const existing = selectPluginStateEntry(store.db, { ...params, now });
+  const existing = hasPluginStateEntry(store.db, { ...params, now });
   if (existing) {
     return false;
   }

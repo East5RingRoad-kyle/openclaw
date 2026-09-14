@@ -30,6 +30,7 @@ import {
   getPluginStateKysely,
   bindPluginStateEntry,
   upsertPluginStateEntry,
+  hasPluginStateEntry,
   selectPluginStateEntry,
   selectPluginStateEntriesInKeyRange,
   deletePluginStateEntry,
@@ -366,7 +367,7 @@ export function pluginStateRegisterSequencedJournalEntry(params: {
             message: "Plugin state journal key must be inside its retained key range.",
           });
         }
-        const existingJournalEntry = selectPluginStateEntry(store.db, {
+        const existingJournalEntry = hasPluginStateEntry(store.db, {
           pluginId: params.pluginId,
           namespace: params.journalNamespace,
           key: prepared.journalKey,
