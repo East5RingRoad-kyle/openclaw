@@ -66,6 +66,14 @@ export const modelsHandlers: GatewayRequestHandlers = {
         undefined,
       );
     } catch (error) {
+      if (error instanceof PreparedModelRuntimePublicationSupersededError) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.UNAVAILABLE, error.message, { retryable: true, retryAfterMs: 0 }),
+        );
+        return;
+      }
       if (!(error instanceof ModelAccountConnectAuthorityError)) {
         throw error;
       }
