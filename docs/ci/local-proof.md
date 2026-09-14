@@ -398,9 +398,11 @@ default `.pnpm` virtual store. Only the package-content store uses the persisten
 sync preserves these ignored directories, so frozen reinstalls and later build
 commands use the same owned install. Hydration checks the tooling loader before
 marking the lease ready. When rehydrating an older lease, the workflow retires
-only its former root link to `/var/tmp/openclaw-pnpm/node_modules` before
-installing physical workspace dependencies. It preserves the external package
-cache and unrelated dependency links.
+only its former root links to `/var/tmp/openclaw-pnpm/node_modules` or
+`${XDG_CACHE_HOME:-$RUNNER_TEMP/cache}/openclaw/pnpm/install/node_modules` before
+installing physical workspace dependencies, including links whose runner cache
+was already cleared. It preserves external package caches and unrelated
+dependency links.
 
 Native Windows daemon hydration retains its external dependency junction because
 released Crabbox native Windows delete-sync replaces workspace contents. Move

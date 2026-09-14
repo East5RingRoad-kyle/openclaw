@@ -58,11 +58,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Crabbox clears the old readiness marker before replay; this exact link is workflow-owned.
-          if [ -L node_modules ] &&
-            readlink -n node_modules | cmp -s - <(printf '%s' /var/tmp/openclaw-pnpm/node_modules); then
-            rm -f -- node_modules
-          fi
+          # Replay clears old markers and its runner cache, so compare the workflow's exact former targets.
+          legacy_modules_dirs=(
+            /var/tmp/openclaw-pnpm/node_modules
+            "${XDG_CACHE_HOME:-$RUNNER_TEMP/cache}/openclaw/pnpm/install/node_modules"
+          )
+          for legacy_modules_dir in "${legacy_modules_dirs[@]}"; do
+            if [ -L node_modules ] &&
+              readlink -n node_modules | cmp -s - <(printf '%s' "$legacy_modules_dir"); then
+              rm -f -- node_modules
+              break
+            fi
+          done
 
       - name: Setup pnpm and dependencies
         shell: bash

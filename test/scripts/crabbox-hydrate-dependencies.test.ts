@@ -44,6 +44,10 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
     ["default hydration", "unknown"],
     ["GitHub hydration", "unknown"],
     ["default hydration", "unknown-newline"],
+    ["default hydration", "fallback"],
+    ["default hydration", "fallback-dangling"],
+    ["default hydration", "configured-fallback"],
+    ["default hydration", "unknown-fallback"],
   ] as const)(
     "%s handles %s dependencies during frozen installs",
     (entrypoint, initialState) => {
@@ -55,6 +59,18 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
       const installRoot = path.join(root, "external-install");
       const store = path.join(root, "store");
       const runnerTemp = path.join(root, "runner");
+      const usesFallback = [
+        "fallback",
+        "fallback-dangling",
+        "configured-fallback",
+        "unknown-fallback",
+      ].includes(initialState);
+      const cacheRoot =
+        initialState === "configured-fallback"
+          ? path.join(root, "configured cache with spaces")
+          : initialState === "unknown-fallback"
+            ? path.join(root, "unrelated-cache")
+            : path.join(runnerTemp, "cache");
       for (const directory of [workspace, ui, bin, runnerTemp, store]) {
         mkdirSync(directory, { recursive: true });
       }
@@ -172,6 +188,9 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         DEPENDENCY_CACHE_HIT: "false",
         FROZEN_LOCKFILE: "true",
       };
+      if (initialState === "configured-fallback") {
+        env.XDG_CACHE_HOME = cacheRoot;
+      }
       mkdirSync(env.HOME!, { recursive: true });
       const run = (command: string, args: string[], cwd = workspace) => {
         const result = spawnSync(command, args, {
@@ -186,8 +205,12 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
       expect(`pnpm@${run("pnpm", ["--version"])}`).toBe(packageManager.split("+")[0]);
       run("pnpm", ["install", "--lockfile-only", "--offline", "--ignore-scripts"]);
 
-      const externalRoot =
-        initialState === "unknown" ? path.join(root, "unrelated-install") : installRoot;
+      const externalRoot = usesFallback
+        ? path.join(cacheRoot, "openclaw/pnpm/install")
+        : initialState === "unknown"
+          ? path.join(root, "unrelated-install")
+          : installRoot;
+      const legacyStore = usesFallback ? path.join(cacheRoot, "openclaw/pnpm/store") : store;
       const externalModules = path.join(externalRoot, "node_modules");
       const linkedModules =
         initialState === "unknown-newline" ? `${externalModules}\n` : externalModules;
@@ -199,9 +222,11 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
           "--frozen-lockfile",
           `--config.modules-dir=${externalModules}`,
           `--config.virtual-store-dir=${path.join(externalRoot, "virtual-store")}`,
+          `--config.store-dir=${legacyStore}`,
         ]);
         externalMetadata = readFileSync(path.join(externalModules, ".modules.yaml"), "utf8");
         write(externalRoot, "virtual-store/retained-cache", "legacy package cache\n");
+        write(legacyStore, "retained-cache", "shared package store\n");
         write(store, "retained-cache", "shared package store\n");
         // Reproduce the old workflow's final relocation after a real successful install.
         rmSync(path.join(workspace, "node_modules"), { recursive: true, force: true });
@@ -221,12 +246,19 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         write(
           root,
           path.relative(root, exports),
-          `export CI=true\nexport GITHUB_WORKSPACE=${shellQuote(workspace)}\nexport GITHUB_RUN_ID=fixture\n${legacyExports}`,
+          `export CI=true\nexport GITHUB_WORKSPACE=${shellQuote(workspace)}\nexport GITHUB_RUN_ID=fixture\nexport PNPM_CONFIG_STORE_DIR=${shellQuote(legacyStore)}\n${usesFallback ? `export XDG_CACHE_HOME=${shellQuote(cacheRoot)}\n` : ""}${legacyExports}`,
         );
         // Released Crabbox clears both native handoff markers before starting rehydration.
         rmSync(handoff);
         rmSync(exports);
         expect(existsSync(handoff) || existsSync(exports)).toBe(false);
+        if (initialState === "fallback-dangling") {
+          // Native rehydration recreates the same lease's runner root before workflow steps.
+          rmSync(runnerTemp, { recursive: true });
+          mkdirSync(runnerTemp);
+          expect(existsSync(externalModules)).toBe(false);
+          expect(readlinkSync(path.join(workspace, "node_modules"))).toBe(linkedModules);
+        }
       }
 
       let script: string;
@@ -260,7 +292,11 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         script = `${retirement ?? ""}\n${script}`.replaceAll("/var/tmp/openclaw-pnpm", installRoot);
       }
 
-      if (initialState === "unknown" || initialState === "unknown-newline") {
+      if (
+        initialState === "unknown" ||
+        initialState === "unknown-newline" ||
+        initialState === "unknown-fallback"
+      ) {
         const rejected = spawnSync("bash", ["-c", script], {
           cwd: workspace,
           env,
@@ -299,12 +335,20 @@ describe.skipIf(process.platform === "win32")("Crabbox dependency hydration", ()
         }
       }
       if (initialState !== "fresh") {
-        expect(readFileSync(path.join(externalModules, ".modules.yaml"), "utf8")).toBe(
-          externalMetadata,
-        );
-        expect(readFileSync(path.join(externalRoot, "virtual-store/retained-cache"), "utf8")).toBe(
-          "legacy package cache\n",
-        );
+        if (initialState === "fallback-dangling") {
+          expect(existsSync(externalRoot)).toBe(false);
+          expect(existsSync(legacyStore)).toBe(false);
+        } else {
+          expect(readFileSync(path.join(externalModules, ".modules.yaml"), "utf8")).toBe(
+            externalMetadata,
+          );
+          expect(
+            readFileSync(path.join(externalRoot, "virtual-store/retained-cache"), "utf8"),
+          ).toBe("legacy package cache\n");
+          expect(readFileSync(path.join(legacyStore, "retained-cache"), "utf8")).toBe(
+            "shared package store\n",
+          );
+        }
         expect(readFileSync(path.join(store, "retained-cache"), "utf8")).toBe(
           "shared package store\n",
         );
