@@ -49,7 +49,10 @@ const retirements = resolveGlobalSingleton(
 );
 type PluginRegistrySnapshot = ReturnType<typeof captureActivePluginRegistrySnapshot>;
 type RegistryOwnerClose = {
-  promise: Promise<{ memoryErrors: readonly unknown[] }>;
+  promise: Promise<{
+    memoryErrors: readonly unknown[];
+    pluginFailures: PluginHostCleanupResult["failures"];
+  }>;
   failure?: PluginRuntimeCloseRetainedError;
 };
 type RegistryOwner = PluginRegistrySnapshot & {
@@ -462,6 +465,7 @@ export function createPluginRegistryOwner(registry: PluginRegistry, workspaceDir
           }
           // Memory preparation can be retried. Once disposal is issued, its raw
           // completion joins inventory cleanup without holding up independent owners.
+          let pluginFailures: PluginHostCleanupResult["failures"] = [];
           let retirement: Promise<void> | undefined;
           const retire = () =>
             (retirement ??= Promise.resolve().then(async () => {
@@ -482,15 +486,15 @@ export function createPluginRegistryOwner(registry: PluginRegistry, workspaceDir
               }
               if (registryOwners.size === 0 && state.activeRegistry === null) {
                 await clearActivePluginRegistry(previous);
-                return;
+              } else {
+                const retainedRegistry = survivor?.activeRegistry ?? null;
+                retirePluginRegistryIfUnused(previous, () => retainedRegistry);
               }
-              const retainedRegistry = survivor?.activeRegistry ?? null;
-              retirePluginRegistryIfUnused(previous, () => retainedRegistry);
-              await waitForPluginRegistryRetirement(previous);
+              pluginFailures = (await waitForPluginRegistryRetirement(previous)).failures;
             }));
           await onRetirement?.(retire);
           await retire();
-          return { memoryErrors };
+          return { memoryErrors, pluginFailures };
         }),
       };
       // Install the single-flight owner before preparation can invoke plugin code.
