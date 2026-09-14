@@ -271,15 +271,14 @@ class SystemsPage extends OpenClawLightDomElement {
         <select
           class="systems-mobile-picker"
           aria-label=${t("systems.select")}
-          .value=${controller.selectedId ?? ""}
           @change=${(event: Event) => {
             if (event.currentTarget instanceof HTMLSelectElement) {
               controller.select(event.currentTarget.value);
             }
           }}
         >
-          <option value="" disabled>${t("systems.select")}</option>
-          ${controller.rows.map((entry) => html`<option value=${entry.environment.id}>${systemName(entry)}</option>`)}
+          <option value="" disabled .selected=${!row}>${t("systems.select")}</option>
+          ${controller.rows.map((entry) => html`<option value=${entry.environment.id} .selected=${entry.environment.id === controller.selectedId}>${systemName(entry)}</option>`)}
         </select>
         <button
           class="systems-icon-button"

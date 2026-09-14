@@ -154,6 +154,7 @@ describe("Systems workspace", () => {
     await page.updateComplete;
     expect(controller.selectedId).toBe(worker.id);
     expect(page.textContent).toContain("This machine is no longer listed");
+    expect(page.querySelector<HTMLSelectElement>(".systems-mobile-picker")?.value).toBe("");
     expect(page.querySelector("openclaw-desktop-panel")).toBeNull();
     expect(handle.disconnect).toHaveBeenCalled();
     window.dispatchEvent(
@@ -165,6 +166,31 @@ describe("Systems workspace", () => {
     expect(controller.selectedId).toBe("worker-no-longer-known");
     expect(page.textContent).toContain("This machine is no longer listed");
     expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a retained worker selected in the mobile picker after remount", async () => {
+    const { controller } = harness();
+    vi.spyOn(DesktopClient.prototype, "connect").mockImplementation(async (options) => {
+      options.onConnect?.();
+      return createConnectionHandle();
+    });
+    const first = await mount(controller);
+    controller.select(worker.id);
+    await first.page.updateComplete;
+    expect(first.page.querySelector<HTMLSelectElement>(".systems-mobile-picker")?.value).toBe(
+      worker.id,
+    );
+    first.page.remove();
+    first.sidebar.remove();
+
+    const second = await mount(controller);
+    await vi.waitFor(() => expect(controller.loading).toBe(false));
+    await second.page.updateComplete;
+    expect(controller.selectedId).toBe(worker.id);
+    expect(second.page.querySelector<HTMLSelectElement>(".systems-mobile-picker")?.value).toBe(
+      worker.id,
+    );
+    expect(second.page.querySelector("openclaw-desktop-panel")?.requestedSource).toBe(worker.id);
   });
 
   it("shows offline last-known telemetry without creating a desktop connection", async () => {

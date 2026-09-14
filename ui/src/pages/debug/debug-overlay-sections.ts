@@ -8,6 +8,8 @@ import type { SessionsListResult } from "../../api/types.ts";
 import type { ApplicationGateway } from "../../app/gateway.ts";
 import {
   collectGatewayStatusSamples,
+  formatGatewayMemory,
+  renderGatewayCpuVital,
   renderGatewayVitals,
   type GatewayStatusSample,
   type GatewayStatusSnapshot,
@@ -19,6 +21,10 @@ import {
   loadCommandLaneDiagnostics,
   type CommandLaneDiagnostics,
 } from "../../lib/gateway-diagnostics.ts";
+import {
+  DEBUG_OVERLAY_SECTION_HEADERS,
+  type DebugOverlaySectionId,
+} from "./debug-overlay-loading.ts";
 import { renderCommandLaneRows } from "./lane-table.ts";
 
 type DebugOverlaySectionContext = {
@@ -27,7 +33,7 @@ type DebugOverlaySectionContext = {
 };
 
 type TypedDebugOverlaySectionDescriptor<T> = {
-  id: string;
+  id: DebugOverlaySectionId;
   titleKey: string;
   load: (context: DebugOverlaySectionContext, signal: AbortSignal) => Promise<T>;
   render: (value: T, statusHistory: readonly DebugOverlayStatusSample[]) => TemplateResult;
@@ -48,11 +54,35 @@ function defineDebugOverlaySection<T>(
 }
 
 export type DebugOverlayStatusSnapshot = GatewayStatusSnapshot & {
+  pingMs: number;
   disks?: SystemInfoResult["disks"];
   uptimeMs?: number;
 };
 
 export type DebugOverlayStatusSample = GatewayStatusSample<DebugOverlayStatusSnapshot>;
+
+export function renderDebugOverlayWidget(
+  status: DebugOverlayStatusSnapshot,
+  history: readonly DebugOverlayStatusSample[],
+): TemplateResult {
+  return html`<div class="debug-overlay__widget">
+    ${renderGatewayCpuVital(status, history)}
+    <dl class="debug-overlay__metrics">
+      <div class="debug-overlay__ping" title=${t("debug.overlay.pingDescription")}>
+        <dt>${t("debug.overlay.ping")}</dt>
+        <dd class="mono">
+          ${t("debug.overlay.pingMs", { value: String(Math.round(status.pingMs)) })}
+        </dd>
+      </div>
+      <div class="debug-overlay__memory">
+        <dt>${t("debug.overlay.memory")}</dt>
+        <dd class="mono">
+          ${status.processMemory ? formatGatewayMemory(status.processMemory.rssBytes) : t("common.na")}
+        </dd>
+      </div>
+    </dl>
+  </div>`;
+}
 
 function renderLanes(diagnostics: CommandLaneDiagnostics): TemplateResult {
   return html`
@@ -162,21 +192,21 @@ function renderEvents(gateway: ApplicationGateway): TemplateResult {
 
 export const DEBUG_OVERLAY_SECTIONS: readonly DebugOverlaySectionDescriptor[] = [
   defineDebugOverlaySection({
-    id: "lanes",
-    titleKey: "debug.overlay.lanes",
+    ...DEBUG_OVERLAY_SECTION_HEADERS.lanes,
     load: (context, signal) => loadCommandLaneDiagnostics(context.client, signal),
     render: renderLanes,
   }),
   defineDebugOverlaySection({
-    id: "status",
-    titleKey: "debug.overlay.status",
-    load: (context, signal) =>
-      context.client.request<SystemInfoResult>("system.info", {}, { signal }),
+    ...DEBUG_OVERLAY_SECTION_HEADERS.status,
+    load: async (context, signal): Promise<DebugOverlayStatusSnapshot> => {
+      const startedAt = performance.now();
+      const status = await context.client.request<SystemInfoResult>("system.info", {}, { signal });
+      return { ...status, pingMs: performance.now() - startedAt };
+    },
     render: renderStatus,
   }),
   defineDebugOverlaySection({
-    id: "active-runs",
-    titleKey: "debug.overlay.activeRuns",
+    ...DEBUG_OVERLAY_SECTION_HEADERS["active-runs"],
     load: (context, signal) =>
       context.client.request<SessionsListResult>(
         "sessions.list",
@@ -186,8 +216,7 @@ export const DEBUG_OVERLAY_SECTIONS: readonly DebugOverlaySectionDescriptor[] = 
     render: renderActiveRuns,
   }),
   defineDebugOverlaySection({
-    id: "events",
-    titleKey: "debug.overlay.events",
+    ...DEBUG_OVERLAY_SECTION_HEADERS.events,
     load: async (context) => context.gateway,
     render: renderEvents,
   }),

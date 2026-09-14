@@ -9,7 +9,24 @@ export const en: TranslationMap & {
   configPage: TranslationMap;
   connection: TranslationMap;
   configView: TranslationMap;
-  debug: TranslationMap & { overlay: TranslationMap };
+  debug: TranslationMap & {
+    lanes: TranslationMap & Record<"lane" | "active" | "queued" | "blocked", string>;
+    overlay: TranslationMap &
+      Record<
+        | "title"
+        | "eyebrow"
+        | "minimize"
+        | "expand"
+        | "lanes"
+        | "status"
+        | "activeRuns"
+        | "events"
+        | "cpu"
+        | "memory"
+        | "delayP99",
+        string
+      >;
+  };
   // Lazy en-devices.ts assigns into this namespace.
   devices: TranslationMap;
   desktop: TranslationMap &
@@ -1155,6 +1172,7 @@ export const en: TranslationMap & {
     sessionState: "Session state",
     all: "All",
     sessionArchived: "Session archived",
+    archiving: "Archiving…",
     sessionsArchived: "Archived {count} sessions",
     deleteAllArchived: "Delete all archived…",
     deleteAllArchivedConfirm:
@@ -1625,8 +1643,24 @@ export const en: TranslationMap & {
     },
   },
   debug: {
+    lanes: {
+      lane: "Lane",
+      active: "Active",
+      queued: "Queued",
+      blocked: "Blocked",
+    },
     overlay: {
       title: "System busyness",
+      eyebrow: "Live diagnostics",
+      minimize: "Minimize system busyness",
+      expand: "Expand system busyness",
+      lanes: "Lanes",
+      status: "Event loop / status",
+      activeRuns: "Active runs",
+      events: "Events",
+      cpu: "CPU",
+      memory: "Memory",
+      delayP99: "Delay p99",
     },
   },
   configForm: {
@@ -3228,6 +3262,13 @@ export const en: TranslationMap & {
     automationGroup: "{count} automation sessions",
     automation: "Automation",
     inspectRun: "Inspect run",
+    recap: "Session recap",
+    recapMissing: "No recap yet",
+    recapUpdating: "Updating recap…",
+    recapStale: "New activity since this recap",
+    recapUnavailable: "Recap unavailable",
+    recapRetry: "Retry recap",
+    recapUpdated: "Recap updated {time}",
     backToSessions: "Back to sessions",
     channelLabel: "Channel: {value}",
     agentLabel: "Agent: {value}",
@@ -4511,6 +4552,7 @@ export const en: TranslationMap & {
       dismiss: "Dismiss {author}'s suggestion",
       typing: "{name} is typing…",
       typingMany: "{names} are typing…",
+      typingDraftState: "Typing · not sent",
       state: {
         pending: "Pending",
         accepted: "Accepted",
@@ -5601,10 +5643,13 @@ export const en: TranslationMap & {
       outputPending: "No output yet.",
       subagentActivity: {
         label: "Subagent activity",
-        running: "Subagent",
-        finished: "Subagent finished",
-        failed: "Subagent failed",
-        cancelled: "Subagent cancelled",
+        untitled: "Subagent",
+        queuedDescription: "Queued — waiting to start.",
+        runningDescription: "Running — working on this task.",
+        completedDescription: "Completed — finished successfully.",
+        failedDescription: "Failed — the task ended with an error.",
+        cancelledDescription: "Cancelled — stopped before completion.",
+        timedOutDescription: "Timed out — reached its time limit.",
         openDetails: "Open subagent details for {title}",
         moreWorking: "+{count} more working",
       },
