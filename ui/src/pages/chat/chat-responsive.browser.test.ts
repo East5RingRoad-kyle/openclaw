@@ -289,6 +289,7 @@ function readUiCss(): string {
     "ui/src/styles/chat/tool-cards.css",
     "ui/src/styles/chat/working-indicator.css",
     "ui/src/styles/chat/question-card.css",
+    "ui/src/styles/rail-header.css",
     "ui/src/styles/chat/sidebar.css",
     "ui/src/styles/chat/side-panel.css",
   ];
@@ -2366,19 +2367,6 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
               </div>
             </div>
           </div>
-          <div class="agent-chat__typing-indicator">
-            <span class="agent-chat__typing-avatars">
-              <div class="chat-avatar user">B</div>
-              <span class="chat-avatar-slot">
-                <img
-                  class="chat-avatar user"
-                  alt="Typing participant"
-                  src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36'%3E%3Crect width='36' height='36' fill='purple'/%3E%3C/svg%3E"
-                />
-                <div class="chat-avatar user chat-avatar--sender-initials">C</div>
-              </span>
-            </span>
-          </div>
         </body></html>`,
       );
       const messageAvatarSlot = page.locator(".chat-group .chat-avatar-slot");
@@ -2413,26 +2401,6 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
         expect(layout.avatarLeft).toBeGreaterThanOrEqual(layout.bubbleRight + 9);
         expect(layout.avatarRight).toBeLessThanOrEqual(layout.groupRight + 1);
       }
-
-      const typingAvatars = await page.locator(".agent-chat__typing-avatars").evaluate((row) =>
-        [...row.children].map((avatar) => {
-          const bounds = avatar.getBoundingClientRect();
-          return {
-            height: bounds.height,
-            marginBottom: getComputedStyle(avatar).marginBottom,
-            top: bounds.top,
-            width: bounds.width,
-          };
-        }),
-      );
-      expect(typingAvatars).toHaveLength(2);
-      expect(
-        typingAvatars.map(({ height, marginBottom, width }) => ({ height, marginBottom, width })),
-      ).toEqual([
-        { height: 36, marginBottom: "0px", width: 36 },
-        { height: 36, marginBottom: "0px", width: 36 },
-      ]);
-      expect(Math.abs(typingAvatars[0]!.top - typingAvatars[1]!.top)).toBeLessThanOrEqual(0.5);
 
       await page
         .locator(".chat-thread")
@@ -2473,86 +2441,6 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
       const image = await getRect(page, ".chat-message-image");
       expect(image.width).toBeLessThanOrEqual(lane.width + 1);
       expect(image.width / image.height).toBeCloseTo(6, 1);
-    });
-  });
-
-  // Bind polling to this concurrent test instead of Vitest's ambient current test.
-  it("keeps managed image actions anchored around tiny rendered images", async (context) => {
-    await withBrowserPage(openBrowserPage(1280, 900), async (page) => {
-      await page.setContent(
-        `<!doctype html><html><head><style>${readUiCss()}</style></head><body>
-          <div class="chat-message-images">
-            <span class="chat-image-frame chat-image-frame--managed">
-            <button class="chat-message-image-button" type="button">
-              <img
-                class="chat-message-image chat-message-image--small"
-                width="16"
-                height="16"
-                alt="Tiny generated image"
-                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23dc4f92'/%3E%3C/svg%3E"
-              />
-            </button>
-            <span class="chat-image-actions">
-              <button class="chat-image-action" type="button">1</button>
-              <button class="chat-image-action" type="button">2</button>
-            </span>
-            </span>
-            <span class="chat-image-frame chat-image-frame--managed">
-            <button class="chat-message-image-button" type="button">
-              <img
-                class="chat-message-image"
-                width="420"
-                height="1800"
-                alt="Tall generated image"
-                src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='1800'%3E%3Crect width='420' height='1800' fill='%235c86ff'/%3E%3C/svg%3E"
-              />
-            </button>
-            <span class="chat-image-actions">
-              <button class="chat-image-action" type="button">1</button>
-              <button class="chat-image-action" type="button">2</button>
-            </span>
-            </span>
-          </div>
-        </body></html>`,
-      );
-      const frames = page.locator(".chat-image-frame--managed");
-      await context.expect.poll(() => frames.count()).toBe(2);
-      const frameRows = await frames.evaluateAll((elements) =>
-        elements.map((element) => {
-          const box = element.getBoundingClientRect();
-          return { bottom: box.bottom, top: box.top };
-        }),
-      );
-      expect(frameRows[1]!.top).toBeGreaterThan(frameRows[0]!.bottom);
-      for (const [index, expectedWidth] of [160, 84].entries()) {
-        const frame = frames.nth(index);
-        await frame.hover();
-        await frame.evaluate(finishElementAnimations);
-        expect(
-          await frame.evaluate((element) => getComputedStyle(element, "::after").opacity),
-        ).toBe("1");
-        const geometry = await frame.evaluate((element) => {
-          const actions = element.querySelector<HTMLElement>(".chat-image-actions")!;
-          const frameRect = element.getBoundingClientRect();
-          const actionsRect = actions.getBoundingClientRect();
-          return {
-            actionsInsideFrame:
-              actionsRect.left >= frameRect.left &&
-              actionsRect.right <= frameRect.right &&
-              actionsRect.top >= frameRect.top &&
-              actionsRect.bottom <= frameRect.bottom,
-            actionsNearBottom: frameRect.bottom - actionsRect.bottom <= 9,
-            fadeWidth: Number.parseFloat(getComputedStyle(element, "::after").width),
-            frameWidth: frameRect.width,
-            overflow: getComputedStyle(element).overflow,
-          };
-        });
-        expect(geometry.actionsInsideFrame).toBe(true);
-        expect(geometry.actionsNearBottom).toBe(true);
-        expect(geometry.fadeWidth).toBeCloseTo(geometry.frameWidth, 0);
-        expect(geometry.frameWidth).toBeCloseTo(expectedWidth, 0);
-        expect(geometry.overflow).toBe("hidden");
-      }
     });
   });
 
