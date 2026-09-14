@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resolveQaArtifactPath } from "./cli-paths.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   dockerLaneName,
@@ -184,7 +185,7 @@ it("retains immutable prepared Docker receipts without claiming installed or run
     });
   const env = await prepare();
   const first = captured[0]!;
-  const firstPath = path.resolve(repoRoot, first.receipt.artifact.path);
+  const firstPath = resolveQaArtifactPath(repoRoot, repoRoot, first.receipt.artifact.path);
   const original = await fs.readFile(firstPath);
   await prepare();
   expect(captured[1]?.receipt.artifact.path).not.toBe(first.receipt.artifact.path);

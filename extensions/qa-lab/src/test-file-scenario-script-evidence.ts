@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { isRepoRootRelativeRef, toRepoRelativePath } from "./cli-paths.js";
+import {
+  isRepoRootRelativeRef,
+  resolveQaArtifactPath,
+  toRepoArtifactPath,
+  toRepoRelativePath,
+} from "./cli-paths.js";
 import {
   QA_EVIDENCE_FILENAME,
   type QaEvidenceSummaryJson,
@@ -41,10 +46,16 @@ function resolveScriptProducerArtifactPath(params: {
   evidenceDir: string;
   repoRoot: string;
   artifactPath: string;
+  explicitBase?: boolean;
 }) {
-  const absolutePath = path.isAbsolute(params.artifactPath)
-    ? params.artifactPath
-    : path.join(params.evidenceDir, params.artifactPath);
+  const absolutePath = resolveQaArtifactPath(
+    params.repoRoot,
+    params.evidenceDir,
+    params.artifactPath,
+  );
+  if (params.explicitBase) {
+    return toRepoArtifactPath(params.repoRoot, absolutePath);
+  }
   const repoRelativePath = toRepoRelativePath(params.repoRoot, absolutePath);
   return isRepoRootRelativeRef(repoRelativePath) ? repoRelativePath : path.normalize(absolutePath);
 }
@@ -69,6 +80,7 @@ function normalizeScriptProducerEvidence(params: {
       artifactPath: artifact.path,
       evidenceDir,
       repoRoot: params.repoRoot,
+      explicitBase: evidence.schemaVersion === 3,
     });
   }
   return validateQaEvidenceSummaryJson(evidence);
@@ -151,6 +163,7 @@ export async function readScriptProducerEvidence(params: {
           evidenceDir: path.dirname(evidencePath),
           repoRoot: params.repoRoot,
           artifactPath: path.resolve(evidencePath),
+          explicitBase: true,
         }),
         source: "script",
         sha256: createHash("sha256").update(captured.bytes).digest("hex"),

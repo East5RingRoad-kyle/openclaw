@@ -249,6 +249,11 @@ describe("retained child evidence ownership", () => {
     parent.importChild(0, shared.snapshot(options));
     parent.select(0, command);
     const before = parent.snapshot(options);
+    expect(() => parent.complete(open, { status: "pass", entries: [row("pass")] })).toThrow(
+      /captured child/,
+    );
+    expect(parent.snapshot(options)).toEqual(before);
+    expect(parent.childInput(0).occurrences).toEqual(before.occurrences);
     child.complete(open, { status: "pass", entries: [row("pass")], receipts: [receipt("later")] });
     const completion = child.snapshot(options);
     const rewritten = structuredClone(before);

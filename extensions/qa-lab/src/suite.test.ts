@@ -3,6 +3,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { CRABLINE_SERVER_CHANNELS } from "@openclaw/crabline";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildQaEvidenceGalleryModel,
+  resolveQaEvidenceArtifactFile,
+  resolveQaEvidenceArtifactFileByIndex,
+} from "./evidence-gallery.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   buildQaSuiteEvidenceSummary,
@@ -14,7 +19,7 @@ import type { QaLabServerHandle } from "./lab-server.types.js";
 import { sanitizeQaProgressValue as sanitizeQaSuiteProgressValue } from "./progress-format.js";
 import type { QaTransportAdapter } from "./qa-transport.js";
 import { writeQaSuiteArtifacts } from "./suite-artifacts.js";
-import { rebaseQaSuiteEvidence } from "./suite-evidence.js";
+import { createQaSuiteEvidenceInvocation, rebaseQaSuiteEvidence } from "./suite-evidence.js";
 import {
   buildQaGatewayHeapCheckpointRuntimeEnvPatch,
   buildQaIsolatedScenarioWorkerParams,
@@ -671,7 +676,9 @@ describe("qa suite", () => {
   it.each([false, true])(
     "writes the selected Crabline driver with an honest failed result (recorded=%s)",
     async (recorded) => {
-      const outputDir = await tempDirs.makeTempDir("qa-suite-crabline-");
+      const repoRoot = await tempDirs.makeTempDir("qa-suite-crabline-");
+      const outputDir = path.join(repoRoot, "nested");
+      await fs.mkdir(outputDir);
       try {
         fetchWithSsrFGuardMock.mockResolvedValue({
           response: {
@@ -709,23 +716,26 @@ describe("qa suite", () => {
             proofClass: null,
           },
         });
-        const id = invocation.begin(0);
-        invocation.complete(id, {
-          status: "fail",
-          entries: buildQaSuiteEvidenceSummary({
-            artifactPaths: [],
+        const recorder = await createQaSuiteEvidenceInvocation(
+          {
+            evidenceAnchors: invocation.anchors,
             channelId: "telegram",
             channelDriver: "crabline",
-            env: { OPENCLAW_QA_REF: "fixture-ref" },
-            generatedAt: "2026-04-11T00:01:00.000Z",
+            onEvidence: (snapshot) => invocation.importChild(0, snapshot),
+          },
+          {
+            repoRoot,
+            outputDir,
             primaryModel: "mock-openai/gpt-5.6-luna",
             providerMode: "mock-openai",
-            scenarioDefinitions: [scenario],
-            scenarioResults: [result],
-          }).entries,
-        });
+            selectedScenarios: [scenario],
+            transportId: "qa-channel",
+          },
+        );
+        const id = recorder.invocation.begin(0);
+        await recorder.record(0, id, result);
         invocation.select(0, id);
-        const recordedEvidence = invocation.snapshot({ generatedAt: "2026-04-11T00:01:00.000Z" });
+        const recordedEvidence = recorder.snapshot();
         const before = structuredClone(recordedEvidence);
         const artifacts = await writeQaSuiteArtifacts({
           outputDir,
@@ -810,18 +820,20 @@ describe("qa suite", () => {
             result?: { failure?: { reason?: string }; status?: string };
           }>;
         };
-        expect(evidence.entries?.[0]?.execution?.artifacts).toEqual(
-          expect.arrayContaining([
-            { kind: "summary", path: "qa-suite-summary.json", source: "qa-suite" },
-            { kind: "report", path: "qa-suite-report.md", source: "qa-suite" },
-            { kind: "channel-capability-matrix", path: capabilityMatrixPath, source: "qa-suite" },
-            {
-              kind: "channel-driver-smoke",
-              path: providerReadinessArtifactPath,
-              source: "qa-suite",
-            },
-          ]),
-        );
+        if (!recorded) {
+          expect(evidence.entries?.[0]?.execution?.artifacts).toEqual(
+            expect.arrayContaining([
+              { kind: "summary", path: "qa-suite-summary.json", source: "qa-suite" },
+              { kind: "report", path: "qa-suite-report.md", source: "qa-suite" },
+              { kind: "channel-capability-matrix", path: capabilityMatrixPath, source: "qa-suite" },
+              {
+                kind: "channel-driver-smoke",
+                path: providerReadinessArtifactPath,
+                source: "qa-suite",
+              },
+            ]),
+          );
+        }
         if (recorded) {
           const parsed = validateQaEvidenceSummaryJson(evidence);
           expect(parsed.schemaVersion).toBe(3);
@@ -829,9 +841,11 @@ describe("qa suite", () => {
             throw new Error("expected recorded occurrences");
           }
           expect(parsed.occurrences).toEqual(before.occurrences);
+          expect(parsed).toEqual(before);
+          expect(() => invocation.importChild(0, parsed)).not.toThrow();
           expect(parsed.entries[0]?.binding).toEqual(before.entries[0]?.binding);
           expect(recordedEvidence).toEqual(before);
-          expect(parsed.occurrences.flatMap((occurrence) => occurrence.receipts)).toEqual([]);
+          expect(parsed.occurrences.flatMap((occurrence) => occurrence.receipts)).toHaveLength(1);
           const rebased = rebaseQaSuiteEvidence(parsed, outputDir, path.dirname(outputDir));
           expect(rebased.entries[0]?.execution?.artifacts).toEqual(
             parsed.entries[0]?.execution?.artifacts.map((artifact) =>
@@ -840,6 +854,38 @@ describe("qa suite", () => {
               }),
             ),
           );
+          const parentEvidencePath = path.join(repoRoot, QA_EVIDENCE_FILENAME);
+          await fs.writeFile(parentEvidencePath, JSON.stringify(rebased));
+          const originalBytes = await fs.readFile(parentEvidencePath);
+          for (const evidencePath of [artifacts.evidencePath, parentEvidencePath]) {
+            const gallery = await buildQaEvidenceGalleryModel({ evidencePath, repoRoot });
+            expect(gallery.counts).toEqual({ pass: 0, fail: 1, blocked: 0, skipped: 0 });
+            for (const [kind, relative] of [
+              ["channel-capability-matrix", capabilityMatrixPath],
+              ["channel-driver-smoke", providerReadinessArtifactPath],
+            ]) {
+              const artifactIndex = gallery.entries[0]!.artifacts.findIndex(
+                (item) => item.kind === kind,
+              );
+              expect(artifactIndex).toBeGreaterThanOrEqual(0);
+              const indexed = await resolveQaEvidenceArtifactFileByIndex({
+                evidencePath,
+                repoRoot,
+                entryIndex: 0,
+                artifactIndex,
+              });
+              const declared = await resolveQaEvidenceArtifactFile({
+                evidencePath,
+                repoRoot,
+                artifactPath: path.join(outputDir, relative!),
+              });
+              expect(await fs.readFile(indexed)).toEqual(await fs.readFile(declared));
+              expect(await fs.readFile(indexed)).toEqual(
+                await fs.readFile(path.join(outputDir, relative!)),
+              );
+            }
+          }
+          expect(await fs.readFile(parentEvidencePath)).toEqual(originalBytes);
         }
         expect(evidence.entries?.[0]?.execution?.channel).toMatchObject({
           driver: "crabline",

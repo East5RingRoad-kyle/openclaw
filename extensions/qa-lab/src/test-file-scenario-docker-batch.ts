@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { z } from "zod";
-import { toRepoRelativePath } from "./cli-paths.js";
+import { toRepoArtifactPath } from "./cli-paths.js";
 import type { QaEvidenceOccurrence } from "./evidence-summary.js";
 import type { QaSeedScenarioWithSource } from "./scenario-catalog.js";
 import { shellQuote } from "./shell-quote.js";
@@ -180,7 +180,7 @@ export async function prepareDockerE2eEnvironment(params: {
         artifact: {
           kind: "docker-candidate",
           source: "script",
-          path: toRepoRelativePath(params.repoRoot, manifestPath),
+          path: toRepoArtifactPath(params.repoRoot, manifestPath),
           sha256: createHash("sha256").update(manifestBytes).digest("hex"),
         },
       },

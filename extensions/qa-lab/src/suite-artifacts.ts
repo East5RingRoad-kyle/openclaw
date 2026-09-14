@@ -247,27 +247,6 @@ export async function writeQaSuiteArtifacts(params: {
           scenarioResults: params.scenarios,
         })
       : undefined;
-  if (params.recordedEvidence && evidence) {
-    // Publication adds presentation links to the cloned rows, never to target
-    // receipts. Slim evidence keeps its intentionally absent execution fields.
-    for (const entry of evidence.entries) {
-      if (!entry.execution) {
-        continue;
-      }
-      for (const artifact of artifactPaths) {
-        if (
-          !entry.execution.artifacts.some(
-            (existing) =>
-              existing.kind === artifact.kind &&
-              existing.path === artifact.path &&
-              existing.source === "qa-suite",
-          )
-        ) {
-          entry.execution.artifacts.push({ ...artifact, source: "qa-suite" });
-        }
-      }
-    }
-  }
   const writeEvidenceFile = params.status !== "running" && (params.writeEvidenceFile ?? true);
   if (!writeEvidenceFile) {
     await fs.rm(evidencePath, { force: true });
@@ -284,6 +263,9 @@ export async function writeQaSuiteArtifacts(params: {
         content: `${JSON.stringify(
           buildQaSuiteSummaryJson({
             ...params,
+            // Publication must not rewrite rows already admitted by a parent.
+            // The gallery reads final presentation paths from this summary.
+            ...(params.recordedEvidence ? { evidence } : {}),
             channelDriverSelection: effectiveChannelDriverSelection,
           }),
           null,

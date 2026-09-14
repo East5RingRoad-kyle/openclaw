@@ -4,7 +4,7 @@ import path from "node:path";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { resolvePositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { assertQaSuiteArtifactWritten } from "./artifact-assertion.js";
-import { isRepoRootRelativeRef, toRepoRelativePath } from "./cli-paths.js";
+import { resolveQaArtifactPath, toRepoArtifactPath } from "./cli-paths.js";
 import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { captureQaEvidenceLaunchIdentity } from "./evidence-environment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
@@ -515,10 +515,9 @@ export async function runQaTestFileScenarios(
   const record = async (result: QaTestFileScenarioResult) => {
     const index = scenarioOrder.get(result.scenario)!;
     const id = observationIds.get(result.scenario)!;
-    const relativeLog = toRepoRelativePath(params.repoRoot, result.logPath);
     const artifact = {
       kind: "log",
-      path: isRepoRootRelativeRef(relativeLog) ? relativeLog : result.logPath,
+      path: toRepoArtifactPath(params.repoRoot, result.logPath),
       source: kind,
       sha256: createHash("sha256")
         .update(await fs.readFile(result.logPath))
@@ -540,7 +539,16 @@ export async function runQaTestFileScenarios(
         ? [structuredClone(params.preparedDockerEvidence.receipt)]
         : []),
     ];
-    const producer = result.producerEvidence;
+    const producer = result.producerEvidence && structuredClone(result.producerEvidence);
+    if (producer?.schemaVersion === 2) {
+      // The v2 adapter returned repo-relative paths. Declare that known base
+      // when these newly captured rows enter this v3 invocation.
+      for (const entry of producer.entries) {
+        for (const item of entry.execution?.artifacts ?? []) {
+          item.path = toRepoArtifactPath(params.repoRoot, path.resolve(params.repoRoot, item.path));
+        }
+      }
+    }
     const commandRows = () =>
       buildNativeCommandEvidence({
         artifactPaths: [{ kind: "log", path: artifact.path }],
@@ -624,7 +632,7 @@ export async function runQaTestFileScenarios(
       result.durationMs = first?.result.timing?.wallMs ?? 0;
       const log = selected.occurrence.receipts.find((receipt) => receipt.artifact.kind === "log");
       if (log) {
-        result.logPath = path.resolve(params.repoRoot, log.artifact.path);
+        result.logPath = resolveQaArtifactPath(params.repoRoot, params.repoRoot, log.artifact.path);
       }
       delete result.producerEvidence;
       delete result.producerArtifact;

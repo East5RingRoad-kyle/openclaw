@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildQaEvidenceGalleryModel,
   resolveQaEvidenceArtifactFileByIndex,
@@ -75,6 +75,155 @@ function vitestArtifactEvidence(params: {
 }
 
 describe("evidence gallery", () => {
+  it("bounds presentation reads and shares in-flight child summaries without reordering rows", async () => {
+    const repoRoot = await createTempRepo();
+    const readFile = fs.readFile.bind(fs);
+    const reads = new Map<string, number>();
+    let active = 0;
+    let peak = 0;
+    try {
+      const outputDir = path.join(repoRoot, "evidence");
+      const source = vitestArtifactEvidence({
+        id: "repeated",
+        title: "Repeated summary",
+        artifact: { kind: "summary", path: "unused" },
+      });
+      const row = source.entries[0]!;
+      source.entries = [];
+      for (let index = 0; index < 12; index += 1) {
+        const summaryPath = path.join(outputDir, `child-${index}`, "qa-suite-summary.json");
+        await writeJson(summaryPath, { run: {} });
+        reads.set(await fs.realpath(summaryPath), 0);
+        for (let copy = 0; copy < 2; copy += 1) {
+          source.entries.push({
+            ...row,
+            test: { ...row.test, id: `${index}:${copy}` },
+            execution: {
+              ...row.execution!,
+              artifacts: [{ kind: "summary", path: summaryPath, source: "qa-suite" }],
+            },
+          });
+        }
+      }
+      const evidencePath = path.join(outputDir, QA_EVIDENCE_FILENAME);
+      await writeJson(evidencePath, source);
+      const spy = vi.spyOn(fs, "readFile").mockImplementation(async (...args) => {
+        const file = String(args[0]);
+        if (!reads.has(file)) {
+          return readFile(...args);
+        }
+        reads.set(file, reads.get(file)! + 1);
+        active += 1;
+        peak = Math.max(peak, active);
+        try {
+          await new Promise<void>((resolve) => {
+            setTimeout(resolve, 5);
+          });
+          return await readFile(...args);
+        } finally {
+          active -= 1;
+        }
+      });
+      try {
+        const gallery = await buildQaEvidenceGalleryModel({ evidencePath, repoRoot });
+        expect([...reads.values()]).toEqual(Array(12).fill(1));
+        expect(peak).toBeGreaterThan(1);
+        expect(peak).toBeLessThanOrEqual(8);
+        expect(active).toBe(0);
+        expect(gallery.entries.map((entry) => entry.id)).toEqual(
+          source.entries.map((entry) => entry.test.id),
+        );
+        expect(gallery.counts.pass).toBe(24);
+      } finally {
+        spy.mockRestore();
+      }
+    } finally {
+      await fs.rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["full", "slim"] as const)(
+    "projects contained suite presentation without rewriting %s rows or counts",
+    async (evidenceMode) => {
+      const repoRoot = await createTempRepo();
+      const outsideRoot = await createTempRepo("qa-gallery-outside-");
+      try {
+        const outputDir = path.join(repoRoot, "evidence");
+        const childDir = path.join(outputDir, "child");
+        await fs.mkdir(childDir, { recursive: true });
+        const escaped = path.join(outsideRoot, "private.json");
+        await fs.writeFile(escaped, "outside roots");
+        await fs.symlink(escaped, path.join(childDir, "escape.json"));
+        const matrixPath = path.join(childDir, "generation", "matrix.json");
+        await writeJson(matrixPath, { generation: "actual" });
+        const summaryPath = path.join(childDir, "qa-suite-summary.json");
+        await writeJson(summaryPath, {
+          run: {
+            channelCapabilityMatrixPath: "generation/matrix.json",
+            channelDriverSmokePath: "escape.json",
+            unrelatedPath: escaped,
+          },
+        });
+        const source = vitestArtifactEvidence({
+          id: "recorded",
+          title: "Recorded row",
+          artifact: { kind: "summary", path: "child/qa-suite-summary.json" },
+        });
+        source.entries[0]!.execution!.artifacts[0]!.source = "qa-suite";
+        const owner = createQaEvidenceInvocation({
+          scenarios: [{ id: "recorded", execution: { kind: "script" } }],
+          channel: null,
+          launch: {
+            source: { ref: null, integrity: null },
+            runtime: { id: null, version: null },
+            package: null,
+            protocol: null,
+            accountRef: null,
+            proofClass: null,
+          },
+        });
+        const id = owner.begin(0);
+        owner.complete(id, { status: "pass", entries: source.entries });
+        owner.select(0, id);
+        const evidence = owner.snapshot({ generatedAt: source.generatedAt, evidenceMode });
+        const evidencePath = path.join(outputDir, QA_EVIDENCE_FILENAME);
+        await writeJson(evidencePath, evidence);
+        const bytes = await fs.readFile(evidencePath);
+        const gallery = await buildQaEvidenceGalleryModel({ evidencePath, repoRoot });
+        expect(gallery.counts).toEqual({ pass: 1, fail: 0, blocked: 0, skipped: 0 });
+        expect(gallery.entries[0]!.effective).toBe(true);
+        if (evidenceMode === "full") {
+          expect(gallery.entries[0]!.artifacts.map((artifact) => artifact.kind)).toEqual([
+            "summary",
+            "channel-capability-matrix",
+          ]);
+          const indexed = await resolveQaEvidenceArtifactFileByIndex({
+            evidencePath,
+            repoRoot,
+            entryIndex: 0,
+            artifactIndex: 1,
+          });
+          const declared = await resolveQaEvidenceArtifactFile({
+            evidencePath,
+            repoRoot,
+            artifactPath: matrixPath,
+          });
+          expect(await fs.readFile(indexed)).toEqual(await fs.readFile(declared));
+        } else {
+          expect(gallery.entries[0]!.artifacts).toEqual([]);
+          expect(evidence.entries[0]!.execution).toBeUndefined();
+        }
+        await expect(
+          resolveQaEvidenceArtifactFile({ evidencePath, repoRoot, artifactPath: escaped }),
+        ).rejects.toThrow("not found");
+        expect(await fs.readFile(evidencePath)).toEqual(bytes);
+      } finally {
+        await fs.rm(repoRoot, { recursive: true, force: true });
+        await fs.rm(outsideRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("keeps duplicate labels and raw artifact indices while counting only the selected retry", async () => {
     const repoRoot = await createTempRepo();
     try {

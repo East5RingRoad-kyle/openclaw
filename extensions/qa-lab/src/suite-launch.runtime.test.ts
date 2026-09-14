@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveQaArtifactPath } from "./cli-paths.js";
 import { QaSuiteInfraError } from "./errors.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
@@ -386,7 +387,7 @@ describe("qa suite runtime launcher", () => {
     );
     expect(new Set(logs.map((artifact) => artifact.path)).size).toBe(3);
     for (const [index, artifact] of logs.entries()) {
-      const bytes = await fs.readFile(path.resolve(repoRoot, artifact.path));
+      const bytes = await fs.readFile(resolveQaArtifactPath(repoRoot, repoRoot, artifact.path));
       expect(bytes.toString()).toContain(`native ${index + 1}`);
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(artifact.sha256);
     }
@@ -609,8 +610,11 @@ describe("qa suite runtime launcher", () => {
         channel: "qa-channel",
       },
     ]);
+    if (result.executionKind !== "flow" || !result.result.evidence) {
+      throw new Error("expected recorded flow evidence");
+    }
     expect(
-      projectQaEvidenceScenarioOutcomes(result.result.evidence!).map((item) => item.status),
+      projectQaEvidenceScenarioOutcomes(result.result.evidence).map((item) => item.status),
     ).toEqual(["fail", null, null]);
     expect(result.result.scenarios).toHaveLength(1);
   });
@@ -2976,7 +2980,9 @@ describe("qa suite runtime launcher", () => {
         proofClass: null,
       },
     });
-    const bytes = await fs.readFile(path.resolve(repoRoot, receipt.artifact.path));
+    const bytes = await fs.readFile(
+      resolveQaArtifactPath(repoRoot, repoRoot, receipt.artifact.path),
+    );
     expect(createHash("sha256").update(bytes).digest("hex")).toBe(receipt.artifact.sha256);
     expect(projectQaEvidenceScenarioOutcomes(evidence).map((outcome) => outcome.status)).toEqual([
       "pass",

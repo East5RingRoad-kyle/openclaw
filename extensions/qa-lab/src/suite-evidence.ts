@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { isRepoRootRelativeRef, toRepoRelativePath } from "./cli-paths.js";
+import {
+  isRepoRootRelativeRef,
+  repoRootTokenArtifactPath,
+  resolveQaArtifactPath,
+  toRepoRelativePath,
+} from "./cli-paths.js";
 import { captureQaEvidenceLaunchIdentity } from "./evidence-environment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
@@ -30,7 +35,11 @@ export function rebaseQaSuiteEvidence(summary: QaEvidenceSummaryJson, from: stri
       : []),
   ];
   for (const artifact of artifacts) {
-    if (artifact.source === "qa-suite" && isRepoRootRelativeRef(artifact.path)) {
+    if (
+      artifact.source === "qa-suite" &&
+      repoRootTokenArtifactPath(artifact.path) === null &&
+      isRepoRootRelativeRef(artifact.path)
+    ) {
       artifact.path = toRepoRelativePath(to, path.resolve(from, artifact.path));
     }
   }
@@ -117,7 +126,13 @@ export async function createQaSuiteEvidenceInvocation(
         : []),
     ];
     const rows = buildQaSuiteEvidenceSummary({
-      artifactPaths: [{ kind: artifact.kind, path: artifact.path }],
+      // Stable presentation destinations belong to the row before admission.
+      // Generation-specific links remain in the published suite summary.
+      artifactPaths: [
+        { kind: artifact.kind, path: artifact.path },
+        { kind: "summary", path: "qa-suite-summary.json" },
+        { kind: "report", path: "qa-suite-report.md" },
+      ],
       channelId: channel,
       channelDriver: params?.channelDriver,
       generatedAt: new Date().toISOString(),
@@ -166,7 +181,9 @@ export async function createQaSuiteEvidenceInvocation(
     if (!receipt) {
       throw new Error("selected flow result has no captured artifact");
     }
-    const bytes = await fs.readFile(path.resolve(context.outputDir, receipt.artifact.path));
+    const bytes = await fs.readFile(
+      resolveQaArtifactPath(context.repoRoot, context.outputDir, receipt.artifact.path),
+    );
     if (createHash("sha256").update(bytes).digest("hex") !== receipt.artifact.sha256) {
       throw new Error("selected flow result artifact changed");
     }

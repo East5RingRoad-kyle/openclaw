@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolveQaArtifactPath } from "./cli-paths.js";
 import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import {
   getEffectiveQaEvidenceEntries,
@@ -101,7 +102,11 @@ process.exitCode = Number(value("--exit"));
       const captured = first.evidence.occurrences.find((item) => item.id === firstId)!;
       const receipt = captured.receipts.find((item) => item.artifact.kind === "producer-evidence")!;
       expect(receipt, await fs.readFile(first.results[0]!.logPath, "utf8")).toBeDefined();
-      const originalPath = path.resolve(process.cwd(), receipt.artifact.path);
+      const originalPath = resolveQaArtifactPath(
+        process.cwd(),
+        process.cwd(),
+        receipt.artifact.path,
+      );
       const originalBytes = await fs.readFile(originalPath);
       expect(receipt.artifact.sha256).toBe(
         createHash("sha256").update(originalBytes).digest("hex"),

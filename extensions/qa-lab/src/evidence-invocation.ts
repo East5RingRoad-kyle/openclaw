@@ -169,6 +169,15 @@ export function createQaEvidenceInvocation(params: {
     },
   ) {
     const occurrence = observationFor(occurrenceId);
+    // Capturing a child freezes even its unfinished observations. Only the
+    // original live invocation may complete them, not an enclosing collector.
+    if (
+      resolveQaEvidenceContainment([...anchors, ...observations], entries).parentById.has(
+        occurrenceId,
+      )
+    ) {
+      throw new Error("captured child evidence cannot be completed by its enclosing invocation");
+    }
     if (
       occurrence.terminalStatus !== null ||
       entries.some((entry) => entry.binding.occurrenceId === occurrenceId)
