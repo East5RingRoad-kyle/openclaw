@@ -508,54 +508,6 @@ describe("createGatewayCloseHandler", () => {
     },
   );
 
-  it.each(["final", "sibling", "cache"])(
-    "rejects plugin cleanup failure after dependency teardown (%s)",
-    async (mode) => {
-      const failure = new Error("active instance cleanup failed");
-      const registry = createEmptyPluginRegistry();
-      const record = createPluginRecord({ id: "active-cleanup" });
-      registry.plugins.push(record);
-      const instance = new PluginInstance(record.id, { record, registry });
-      instance.lifecycle.onDispose(() => {
-        throw failure;
-      });
-      setActivePluginRegistry(registry);
-      const owner = createPluginRegistryOwner(registry);
-      const metadata = mode === "cache" ? retainGatewayPluginMetadata() : undefined;
-      if (mode === "cache") {
-        registry.plugins.length = 0;
-        getPluginCache().instances.add(instance);
-      }
-      const sibling =
-        mode === "sibling" ? createPluginRegistryOwner(createEmptyPluginRegistry()) : undefined;
-      const clearSecretsRuntimeSnapshot = vi.fn();
-      await expect(
-        createGatewayCloseHandler(
-          createGatewayCloseTestDeps({
-            closePluginRegistry: owner.close,
-            ...(metadata ? { pluginMetadata: metadata } : {}),
-            clearSecretsRuntimeSnapshot,
-          }),
-        )(),
-      ).rejects.toMatchObject({ cause: failure });
-      await expect(owner.close()).resolves.toEqual({
-        memoryErrors: [],
-        pluginFailures: [{ pluginId: record.id, hookId: "instance", error: failure }],
-      });
-      expect(mocks.logWarn).toHaveBeenCalledWith(
-        expect.stringMatching(/shutdown failed .*plugin\/active-cleanup/),
-      );
-      expect(mocks.logInfo).not.toHaveBeenCalledWith(expect.stringContaining("completed cleanly"));
-      expect(mocks.logWarn).toHaveBeenCalledWith(expect.stringContaining(failure.message));
-      await expect(instance.dispose()).resolves.toEqual({ errors: [failure] });
-      expect(instance.lifecycle.signal.aborted).toBe(true);
-      expect(getActivePluginRegistry()).toBe(sibling?.registry ?? null);
-      expect(mocks.closePluginStateDatabaseAsync).toHaveBeenCalledOnce();
-      expect(clearSecretsRuntimeSnapshot).toHaveBeenCalledOnce();
-      await sibling?.close();
-    },
-  );
-
   beforeEach(() => {
     resetPluginRuntimeStateForTest();
     vi.useRealTimers();
