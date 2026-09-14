@@ -341,7 +341,7 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
       const debuggers = calls.filter((call) => call.tool === "lldb");
       expect(debuggers).toHaveLength(1);
       const debuggerArgs = debuggers[0].args;
-      expect(debuggerArgs.slice(0, 8)).toEqual([
+      expect(debuggerArgs.slice(0, 10)).toEqual([
         "--batch",
         "--no-lldbinit",
         "-o",
@@ -349,8 +349,11 @@ describe.skipIf(process.platform === "win32")("native test launch ownership", ()
         "-o",
         'breakpoint set --name exit --name _exit -C "register read x0" -C "thread backtrace all" --auto-continue true',
         "-o",
+        'breakpoint set --name CFRunLoopStop --thread-index 1 -C "register read x0" -C "thread backtrace all" --auto-continue true',
+        "-o",
         "run",
       ]);
+      expect(debuggerArgs).toContain("breakpoint list 1 2");
       expect(
         debuggerArgs.slice(
           debuggerArgs.indexOf("--test-bundle-path") + 2,
