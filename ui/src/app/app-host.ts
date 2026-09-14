@@ -4,7 +4,6 @@ import type { GatewayBrowserClient, GatewayEventFrame } from "../api/gateway.ts"
 import "../components/app-topbar.ts";
 import "../components/assistant-panel.ts";
 import "../components/modal-dialog.ts";
-import "../pages/debug/debug-overlay.ts";
 import {
   formatDocumentTitle,
   isSettingsNavigationRoute,
