@@ -413,6 +413,7 @@ export class DraftSubmissionFlow {
       ? this.pendingPlacement.recoveryScope
       : submissionClient.recoveryScope;
     const requestId = ++this.submitRequestToken;
+    const submittedDraft = this.draftPersistence.captureSubmission();
     const submittedAt = startup?.startedAt ?? Date.now();
     const { hello, selfUser } = context.gateway.snapshot;
     const sender =
@@ -526,6 +527,11 @@ export class DraftSubmissionFlow {
               { reconciliation: "background" },
             );
       if (requestId !== this.submitRequestToken && !placementTarget) {
+        // Leaving the view cancels navigation, not a confirmed send. Retire only
+        // the captured source draft; the current route may already hold new input.
+        if (result && result.initialRun.status !== "rejected") {
+          await this.draftPersistence.clearSubmittedDraft(submittedDraft);
+        }
         return;
       }
       if (!result) {
@@ -586,7 +592,7 @@ export class DraftSubmissionFlow {
         if (!ownsStartedPlacement()) {
           return;
         }
-        await this.clearSubmittedDraft(true);
+        await this.clearSubmittedDraft(true, submittedDraft);
         if (!ownsStartedPlacement()) {
           return;
         }
@@ -618,7 +624,7 @@ export class DraftSubmissionFlow {
           buildInitialChatSubmission(sessionKey, initialTurn, submissionClient, initialRun.runId),
         );
       }
-      await this.clearSubmittedDraft(!handedOffAttachments);
+      await this.clearSubmittedDraft(!handedOffAttachments, submittedDraft);
       if (requestId !== this.submitRequestToken) {
         return;
       }
@@ -659,6 +665,7 @@ export class DraftSubmissionFlow {
     }
     this.blockedSubmitGate = null;
     const requestId = ++this.submitRequestToken;
+    const submittedDraft = this.draftPersistence.captureSubmission();
     const initialMessage = this.messageValue.trim();
     this.activeSubmission = { phase: "creating", message: null };
     this.error = null;
@@ -686,7 +693,7 @@ export class DraftSubmissionFlow {
         return;
       }
       this.startedSession.current = null;
-      await this.clearSubmittedDraft(true);
+      await this.clearSubmittedDraft(true, submittedDraft);
       if (requestId !== this.submitRequestToken || this.gateway.client !== client) {
         return;
       }
@@ -703,15 +710,19 @@ export class DraftSubmissionFlow {
     }
   }
 
-  private clearSubmittedDraft(releaseAttachments: boolean): Promise<void> {
+  private clearSubmittedDraft(
+    releaseAttachments: boolean,
+    submitted: ReturnType<NewSessionDraftPersistence["captureSubmission"]>,
+  ): Promise<void> {
     // Record acceptance before any await so reconnects cannot mark it unknown.
-    // Capture durable content before releasing the now-consumed draft.
+    // Its persistence snapshot was captured before creation and page teardown.
     if (this.activeSubmission) {
       this.activeSubmission.phase = "accepted";
     }
-    const persistence = this.draftPersistence.clearSubmittedDraft();
+    const persistence = this.draftPersistence.clearSubmittedDraft(submitted);
     this.messageValue = "";
     this.mentionsValue = [];
+    this.draftPersistence.noteDraftReplaced();
     this.attachmentDraft.clearAfterSubmit(releaseAttachments);
     this.sessionStartup.clear();
     return persistence;
