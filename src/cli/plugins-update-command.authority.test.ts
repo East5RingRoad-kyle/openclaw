@@ -20,6 +20,7 @@ import {
 } from "../plugins/install-transaction.js";
 import { readPersistedInstalledPluginIndexInstallRecords } from "../plugins/installed-plugin-index-records.js";
 import { readPersistedInstalledPluginIndexRowSync } from "../plugins/installed-plugin-index-row.js";
+import type { PluginLifecycleRuntimeApply } from "../plugins/lifecycle.js";
 import {
   markRetainedManagedNpmInstall,
   resolveRetainedManagedNpmInstallMarkerPath,
@@ -274,7 +275,11 @@ describe("plugin update command settlement authority", () => {
           (params) => observeCommit(() => commitConfig(params)),
         );
 
-        const applyRuntime = vi.fn(async () => {});
+        const applyRuntime = vi.fn<PluginLifecycleRuntimeApply>(async ({ pluginIds }) => ({
+          operationId: "fixture-runtime-application",
+          generation: 1,
+          pluginIds: [...pluginIds],
+        }));
         const runUpdate = async () => {
           if (entrypoint !== "direct install") {
             return runPluginUpdateCommand({ id: pluginId, opts: {} });
