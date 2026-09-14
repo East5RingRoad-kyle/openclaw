@@ -101,7 +101,7 @@ type BoundedStringLog = string[] & {
   truncated?: boolean;
 };
 
-type OpenClawTestProcessReadiness = Pick<OpenClawTestProcess, "exitCode" | "signalCode"> & {
+type OpenClawTestProcessReadiness = Pick<OpenClawTestProcess, "pid" | "exitCode" | "signalCode"> & {
   once: (event: "exit", listener: () => void) => unknown;
   off: (event: "exit", listener: () => void) => unknown;
 };
@@ -269,13 +269,35 @@ async function waitForGatewayReady(
   timeoutMs: number,
   fetchImpl: typeof fetch = fetch,
 ) {
-  const exitedBeforeReadinessError = () =>
+  type ProbeObservation = {
+    attempt: number;
+    phase: "headers" | "body" | "complete";
+    elapsedMs: number;
+    status?: number;
+    ready?: boolean;
+    failing?: string[];
+    omittedFailing?: number;
+    error?: "timeout" | "child-exit" | "fetch-failed" | "invalid-json" | "body-failed";
+  };
+  const startedAt = Date.now();
+  let attempts = 0;
+  let lastProbe: ProbeObservation | undefined;
+  const startupError = (message: string, probe = lastProbe) =>
     new Error(
+      `${message}\n[openclaw-test-instance] readiness ${JSON.stringify({
+        attempts,
+        elapsedMs: Date.now() - startedAt,
+        lastProbe: probe ?? null,
+        child: { pid: proc.pid ?? null, exitCode: proc.exitCode, signalCode: proc.signalCode },
+      })}\n${formatLogs(chunksOut, chunksErr)}`,
+    );
+  const exitedBeforeReadinessError = (probe = lastProbe) =>
+    startupError(
       `gateway exited before readiness (code=${String(proc.exitCode)} signal=${String(
         proc.signalCode,
-      )})\n${formatLogs(chunksOut, chunksErr)}`,
+      )})`,
+      probe,
     );
-  const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (hasChildExited(proc)) {
       throw exitedBeforeReadinessError();
@@ -283,12 +305,16 @@ async function waitForGatewayReady(
 
     const remainingMs = timeoutMs - (Date.now() - startedAt);
     const attemptTimeoutMs = Math.min(1_000, Math.max(1, remainingMs));
+    const attemptStartedAt = Date.now();
+    const probe: ProbeObservation = { attempt: ++attempts, phase: "headers", elapsedMs: 0 };
     const probeAbort = new AbortController();
     let attemptTimeout: ReturnType<typeof setTimeout> | undefined;
     let handleExit = () => {};
     const exitPromise = new Promise<never>((_resolve, reject) => {
       handleExit = () => {
-        const error = exitedBeforeReadinessError();
+        probe.error = "child-exit";
+        probe.elapsedMs = Date.now() - attemptStartedAt;
+        const error = exitedBeforeReadinessError(probe);
         probeAbort.abort(error);
         reject(error);
       };
@@ -296,6 +322,7 @@ async function waitForGatewayReady(
     });
     const timeoutPromise = new Promise<never>((_resolve, reject) => {
       attemptTimeout = setTimeout(() => {
+        probe.error = "timeout";
         const error = new Error("gateway readiness probe timed out");
         probeAbort.abort(error);
         reject(error);
@@ -310,7 +337,30 @@ async function waitForGatewayReady(
           const response = await fetchImpl(`http://127.0.0.1:${port}/readyz`, {
             signal: probeAbort.signal,
           });
+          probe.status = response.status;
+          probe.phase = "body";
           const readiness: unknown = await response.json();
+          probe.phase = "complete";
+          if (isRecord(readiness)) {
+            if (typeof readiness.ready === "boolean") {
+              probe.ready = readiness.ready;
+            }
+            if (Array.isArray(readiness.failing)) {
+              // Channel IDs and arbitrary startup reasons are private; retain only core categories.
+              probe.failing = readiness.failing.slice(0, 8).map((reason) => {
+                switch (reason) {
+                  case "startup-sidecars":
+                  case "gateway-draining":
+                  case "state-database":
+                  case "internal":
+                    return reason;
+                  default:
+                    return "other";
+                }
+              });
+              probe.omittedFailing = Math.max(0, readiness.failing.length - 8);
+            }
+          }
           return response.ok && isRecord(readiness) && readiness.ready === true;
         })(),
         exitPromise,
@@ -319,12 +369,22 @@ async function waitForGatewayReady(
       if (ready) {
         return;
       }
-    } catch {
+    } catch (error) {
+      probe.elapsedMs = Date.now() - attemptStartedAt;
       if (hasChildExited(proc)) {
-        throw exitedBeforeReadinessError();
+        probe.error ??= "child-exit";
+        throw exitedBeforeReadinessError(probe);
       }
+      probe.error ??=
+        probe.phase === "headers"
+          ? "fetch-failed"
+          : error instanceof SyntaxError
+            ? "invalid-json"
+            : "body-failed";
       // keep polling
     } finally {
+      // A fetch that ignores abort may finish later; keep its mutations out of the retained receipt.
+      lastProbe = { ...probe, elapsedMs: Date.now() - attemptStartedAt };
       if (attemptTimeout) {
         clearTimeout(attemptTimeout);
       }
@@ -336,9 +396,7 @@ async function waitForGatewayReady(
       await sleep(delayMs);
     }
   }
-  throw new Error(
-    `timeout waiting for gateway readiness on port ${port}\n${formatLogs(chunksOut, chunksErr)}`,
-  );
+  throw startupError(`timeout waiting for gateway readiness on port ${port}`);
 }
 
 function hasGatewayProcessClosed(child: OpenClawTestProcess, platform: NodeJS.Platform): boolean {
