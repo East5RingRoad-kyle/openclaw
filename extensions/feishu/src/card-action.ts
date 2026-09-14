@@ -331,7 +331,10 @@ async function disableFeishuQuestionCard(params: {
   if (!cardMessageId || cardMessageId.startsWith("card-action-c-")) return;
   const client = createFeishuClient(account);
   const response = await client.im.message.get({
-    params: { user_id_type: "open_id" },
+    params: {
+      user_id_type: "open_id",
+      card_msg_content_type: "user_card_content",
+    },
     path: { message_id: cardMessageId },
   });
   if (response.code !== 0) {
