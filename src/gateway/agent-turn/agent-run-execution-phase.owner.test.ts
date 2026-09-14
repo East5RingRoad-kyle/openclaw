@@ -94,6 +94,43 @@ function createExecution(options: { aborted?: boolean; assertContextCurrent?: ()
 describe("startAgentRunExecution Gateway ownership", () => {
   beforeEach(() => dispatchAgentRunFromGateway.mockReset());
 
+  it.each([
+    { sourceIngress: "control-ui" as const, sourceChannel: "webchat", deliveryContext: undefined },
+    {
+      sourceIngress: "channel" as const,
+      sourceChannel: "discord",
+      deliveryContext: { channel: "discord" },
+    },
+  ])(
+    "preserves targetless $sourceChannel policy context at recovery dispatch",
+    async ({ sourceIngress, sourceChannel, deliveryContext }) => {
+      const execution = createExecution();
+      Object.assign(execution.params, {
+        canUseInternalRuntimeHandoff: true,
+        isRestartRecoveryResumeRun: true,
+        resolvedSessionId: "recovery-session",
+        sessionEntry: {
+          sessionId: "recovery-session",
+          updatedAt: 1,
+          restartRecoveryDeliveryRunId: execution.params.runId,
+          restartRecoveryDeliverySourceRunId: "source-run",
+          restartRecoveryDeliveryContext: deliveryContext,
+          restartRecoverySourceIngress: sourceIngress,
+        },
+      });
+      execution.params.request.expectedExistingSessionId = "recovery-session";
+      execution.params.delivery.originMessageChannel = "slack";
+      dispatchAgentRunFromGateway.mockResolvedValueOnce(undefined);
+
+      await startAgentRunExecution(execution.params);
+
+      expect(dispatchAgentRunFromGateway).toHaveBeenCalledOnce();
+      const dispatch = dispatchAgentRunFromGateway.mock.calls[0]?.[0];
+      expect(dispatch?.ingressOpts.runContext.messageChannel).toBe(sourceChannel);
+      expect(dispatch?.ingressOpts.runContext.currentChannelId).toBeUndefined();
+    },
+  );
+
   it("dispatches with the runtime generation frozen at admission", async () => {
     const execution = createExecution();
     const { promise: dispatched, resolve: resolveDispatched } = createDeferred();

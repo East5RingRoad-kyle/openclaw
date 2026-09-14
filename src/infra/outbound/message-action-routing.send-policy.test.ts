@@ -76,6 +76,38 @@ describe("runMessageAction core send routing", () => {
       .mockReset()
       .mockImplementation(async (params: { payload: unknown }) => params.payload);
   });
+  it.each([
+    { name: "bound target", currentChannelId: "source-chat" },
+    { name: "missing targets" },
+    { name: "empty targets", currentChannelId: "", currentMessagingTarget: "" },
+    { name: "blank targets", currentChannelId: " ", currentMessagingTarget: "\t" },
+  ])("rejects WebChat cross-provider sends with $name before transport", async (targets) => {
+    const sendText = registerSlackTextPlugin();
+
+    await expect(
+      runMessageAction({
+        cfg: slackConfig,
+        action: "send",
+        params: {
+          channel: "slack",
+          target: "channel:C123",
+          message: "synthetic policy probe",
+          bestEffort: true,
+        },
+        toolContext: {
+          currentChannelProvider: "webchat",
+          currentChannelId: targets.currentChannelId,
+          currentMessagingTarget: targets.currentMessagingTarget,
+        },
+        dryRun: false,
+      }),
+    ).rejects.toMatchObject({
+      reasonCode: "message_cross_context_denied",
+      policyRef: "message-cross-context:provider",
+    });
+    expect(sendText).not.toHaveBeenCalled();
+  });
+
   it("accepts Telegram numeric forum topic targets through plugin-owned grammar", async () => {
     setActivePluginRegistry(
       createTestRegistry([
