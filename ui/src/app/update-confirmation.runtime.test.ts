@@ -388,6 +388,19 @@ it("keeps the failure visible until the operator explicitly opens its review act
   expect(document.body.querySelector("openclaw-modal-dialog")?.textContent).toContain(
     "Read the recorded cause",
   );
+  await stream.push({
+    run: null,
+    busy: false,
+    connected: true,
+    failure: "Read the recorded cause before retrying.",
+    readError: "Could not check for updates: timeout",
+  });
+  expect(document.body.querySelector("openclaw-modal-dialog")?.textContent).toContain(
+    "Read the recorded cause",
+  );
+  expect(document.body.querySelector("openclaw-modal-dialog")?.textContent).toContain(
+    "Could not check for updates: timeout",
+  );
   expect(onReviewUpdate).not.toHaveBeenCalled();
   findButton("Review update").click();
   await settled;
@@ -440,6 +453,7 @@ it.each([
     });
     let admitted = entry === "existing";
     let rejectRunReads = false;
+    let rejectStatusChecks = false;
     const request = vi.fn<RequestFn>(async (method) => {
       if (method === "update.run") {
         admitted = true;
@@ -450,6 +464,9 @@ it.each([
           throw new Error("Run status read failed");
         }
         return { run };
+      }
+      if (method === "update.status" && rejectStatusChecks) {
+        throw new Error("Update status check failed");
       }
       return method === "update.status" && admitted
         ? { [status === "running" ? "activeRun" : "lastRun"]: run }
@@ -496,8 +513,17 @@ it.each([
           ),
         ).toBe(false);
       }
+      rejectStatusChecks = true;
       check.click();
       await flushMicrotasks();
+      expect(modal.textContent).toContain(
+        "Could not check for updates: Update status check failed",
+      );
+      expect(view.run).toEqual(run);
+      rejectStatusChecks = false;
+      findButton("Check status").click();
+      await flushMicrotasks();
+      expect(modal.textContent).not.toContain("Could not check for updates");
       expect(modal.textContent).not.toContain("Run status read failed");
       expect(view.run).toEqual(run);
       expect(request.mock.calls.filter(([method]) => method === "update.run")).toHaveLength(
