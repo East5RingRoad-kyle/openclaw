@@ -1,3 +1,4 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { nothing, render } from "lit";
 import { vi } from "vitest";
 import { resetChatThreadState } from "../chat-thread.ts";
@@ -91,6 +92,14 @@ export function threadProps(
     onDraftChange: () => {},
     onSend: () => {},
   };
+}
+
+export function transcriptSize(container: ParentNode): number {
+  const sizer = expectDefined(
+    container.querySelector<HTMLElement>(".chat-virtual-sizer"),
+    "transcript extent",
+  );
+  return Number.parseFloat(sizer.style.height);
 }
 
 export function transcriptRows(container: HTMLElement): HTMLElement[] {
