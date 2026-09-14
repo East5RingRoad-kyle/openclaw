@@ -1,10 +1,42 @@
-import { nothing, render } from "lit";
+import { expectDefined } from "@openclaw/normalization-core";
+import { html, nothing, render } from "lit";
 import { vi } from "vitest";
 import { resetChatThreadState } from "../chat-thread.ts";
 import { createTestTranscript } from "../chat-view.test-helpers.ts";
 import { resetThreadPresentation, type ChatThreadProps } from "./chat-thread-interactions.ts";
 import type { TranscriptRow } from "./chat-transcript-layout.ts";
 import type { ChatTranscriptSession } from "./chat-transcript-session.ts";
+
+export function transcriptSize(container: ParentNode): number {
+  const sizer = expectDefined(
+    container.querySelector<HTMLElement>(".chat-virtual-sizer"),
+    "transcript extent",
+  );
+  return Number.parseFloat(sizer.style.height);
+}
+
+export function stubMcpAppLifecycle(
+  container: ParentNode,
+  teardown: () => Promise<void> = () => Promise.resolve(),
+) {
+  const app = expectDefined(
+    container.querySelector<HTMLElement>("mcp-app-view"),
+    "mounted MCP app",
+  );
+  const lifecycle = {
+    restartAfterTeardown: vi.fn(),
+    teardown: vi.fn(teardown),
+  };
+  return { app: Object.assign(app, lifecycle), ...lifecycle };
+}
+
+export function mcpRangeRows(appContent: unknown): TestContentRow[] {
+  return Array.from({ length: 24 }, (_, index) => ({
+    kind: "content" as const,
+    key: `row:${index}`,
+    content: index === 17 ? appContent : html`<div>row ${index}</div>`,
+  }));
+}
 
 export const observedElements = new Set<Element>();
 export const resizeObservers = new Set<RecordingResizeObserver>();
