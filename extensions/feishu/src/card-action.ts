@@ -310,12 +310,21 @@ async function sendInvalidInteractionNotice(params: {
         : params.reason === "wrong_conversation"
           ? "This card action belongs to a different conversation."
           : "This card action payload is invalid.";
+  const cardMessageId =
+    params.event.context.open_message_id ?? params.event.open_message_id;
+  const validCardMessageId =
+    cardMessageId && !cardMessageId.startsWith("card-action-c-")
+      ? cardMessageId
+      : undefined;
 
   await sendMessageFeishu({
     cfg: params.cfg,
     to: resolveCallbackTarget(params.event),
     text: `⚠️ ${reasonText}`,
     accountId: params.accountId,
+    ...validCardMessageId
+      ? { replyToMessageId: validCardMessageId, allowTopLevelReplyFallback: true }
+      : {},
   });
 }
 
@@ -455,11 +464,24 @@ export async function handleFeishuCardAction(params: {
             result.status === "answered"
               ? `✅ Answer submitted: ${optionValue}`
               : "⚠️ This question was already answered or has expired.";
+          const feedbackCardMessageId =
+            event.context.open_message_id ?? event.open_message_id;
+          const feedbackReplyTarget =
+            feedbackCardMessageId &&
+            !feedbackCardMessageId.startsWith("card-action-c-")
+              ? feedbackCardMessageId
+              : undefined;
           await sendMessageFeishu({
             cfg,
             to: resolveCallbackTarget(event),
             text: feedbackText,
             accountId,
+            ...feedbackReplyTarget
+              ? {
+                  replyToMessageId: feedbackReplyTarget,
+                  allowTopLevelReplyFallback: true,
+                }
+              : {},
           }).catch(() => {});
         } catch (err) {
           log(
