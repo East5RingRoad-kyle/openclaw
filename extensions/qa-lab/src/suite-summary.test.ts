@@ -29,6 +29,54 @@ async function readSummary<T>(
 }
 
 describe("qa suite summary helpers", () => {
+  it.each([null, "fail", "blocked", "skipped"] as const)(
+    "keeps canonical %s scheduled outcomes visible beside optional aggregates",
+    async (status) => {
+      const invocation = createQaEvidenceInvocation({
+        scenarios: ["passed", "pending"].map((id) => ({ id, execution: { kind: "script" } })),
+        channel: null,
+        launch: {
+          source: { ref: null, integrity: null },
+          runtime: { id: null, version: null },
+          package: null,
+          protocol: null,
+          accountRef: null,
+          proofClass: null,
+        },
+      });
+      for (const [index, outcome] of (["pass", status] as const).entries()) {
+        if (outcome === null) {
+          continue;
+        }
+        const id = invocation.begin(index);
+        invocation.complete(id, {
+          status: outcome,
+          entries: [
+            {
+              test: { kind: "script", id: `check-${index}`, title: "Recorded check" },
+              coverage: [],
+              result: { status: outcome },
+            },
+          ],
+        });
+        invocation.select(index, id);
+      }
+      const evidence = invocation.snapshot({ generatedAt: "2026-09-14T00:00:00.000Z" });
+      for (const aggregate of [
+        {},
+        { scenarios: [{ status: "pass" }] },
+        { counts: { failed: 0, skipped: 0 }, scenarios: [{ status: "pass" }] },
+      ]) {
+        await expect(
+          readSummary({ ...aggregate, evidence }, readQaSuiteFailedScenarioCountFromFile),
+        ).resolves.toBe(status === "skipped" ? 0 : 1);
+        await expect(
+          readSummary({ ...aggregate, evidence }, readQaSuiteFailedOrSkippedScenarioCountFromFile),
+        ).resolves.toBe(1);
+      }
+    },
+  );
+
   it("counts the selected instance without letting retained retry failures contradict a pass", async () => {
     const invocation = createQaEvidenceInvocation({
       scenarios: [{ id: "retry-fixture", execution: { kind: "script" } }],

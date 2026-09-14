@@ -451,8 +451,12 @@ function readQaSuiteScenarioCountFromSummary(
       : entries
         ? entries.filter((entry) => matchesStatus(readQaSuiteEvidenceEntryStatus(entry))).length
         : null;
-  // Counts and scenario rows own scenario cardinality. Raw evidence is a
-  // lower-level fallback only when neither aggregate is available.
+  // Canonical v3 outcomes own scheduled instances, including unresolved ones.
+  // Optional aggregates cannot hide them; v2 rows remain lower-level checks.
+  if (evidence?.schemaVersion === 3) {
+    return Math.max(evidenceCount ?? 0, counted ?? 0, scenarioCount ?? 0);
+  }
+  // Legacy raw evidence is a fallback only when neither aggregate is available.
   if (counted !== null || scenarioCount !== null) {
     return Math.max(counted ?? 0, scenarioCount ?? 0);
   }

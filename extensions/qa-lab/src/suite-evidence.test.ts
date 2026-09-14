@@ -6,6 +6,7 @@ import { createQaEvidenceInvocation } from "./evidence-invocation.js";
 import {
   getEffectiveQaEvidenceEntries,
   projectQaEvidenceScenarioOutcomes,
+  validateQaEvidenceSummaryJson,
   type QaEvidenceIdentity,
 } from "./evidence-summary.js";
 import { createQaSuiteEvidenceInvocation, rebaseQaSuiteEvidence } from "./suite-evidence.js";
@@ -47,6 +48,55 @@ async function setup() {
 }
 
 describe("flow occurrence artifacts", () => {
+  it.each(["full", "slim"] as const)(
+    "round-trips parent-relative %s history without changing paths, hashes or input",
+    async (evidenceMode) => {
+      const { outputDir, evidence } = await setup();
+      const id = evidence.invocation.begin(0);
+      await evidence.record(0, id, { name: "parent", status: "fail", steps: [] });
+      const summary = evidence.invocation.snapshot({
+        generatedAt: "2026-09-14T00:00:00.000Z",
+        evidenceMode,
+      });
+      const occurrence = summary.occurrences.find((item) => item.id === id)!;
+      const receipt = occurrence.receipts[0]!;
+      const preserved = [
+        { ...receipt.artifact, path: path.join(outputDir, "absolute.json") },
+        { ...receipt.artifact, path: "<repo-root>/artifacts/pinned.json" },
+        { ...receipt.artifact, path: "../producer.json", source: "script-producer" },
+      ];
+      occurrence.receipts.push(
+        ...preserved.map((artifact, index) => ({
+          ...receipt,
+          id: `${id}:preserved-${index}`,
+          artifact,
+        })),
+      );
+      summary.entries[0]?.execution?.artifacts.push(
+        ...preserved.map(({ kind, path: artifactPath, source }) => ({
+          kind,
+          path: artifactPath,
+          source,
+        })),
+      );
+      const original = validateQaEvidenceSummaryJson(summary);
+      const before = JSON.stringify(original);
+      const workerDir = path.join(outputDir, "scenarios", "worker");
+      const child = rebaseQaSuiteEvidence(original, outputDir, workerDir);
+      if (child.schemaVersion !== 3) {
+        throw new Error("expected v3 history");
+      }
+      const childReceipts = child.occurrences.find((item) => item.id === id)!.receipts;
+      expect(childReceipts[0]!.artifact.path).toBe(`../../${receipt.artifact.path}`);
+      expect(childReceipts.slice(1).map((item) => item.artifact)).toEqual(preserved);
+      expect(rebaseQaSuiteEvidence(child, workerDir, outputDir)).toEqual(original);
+      expect(JSON.stringify(original)).toBe(before);
+      expect(child.entries[0]?.execution === undefined).toBe(evidenceMode === "slim");
+      const bytes = await fs.readFile(path.join(outputDir, receipt.artifact.path));
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(receipt.artifact.sha256);
+    },
+  );
+
   it("returns the original failed result when a continued retry skips", async () => {
     const { outputDir, evidence } = await setup();
     const first = evidence.invocation.begin(0);

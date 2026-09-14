@@ -391,7 +391,7 @@ async function projectQaEvidenceArtifacts(params: {
         for (const [kind, field] of [
           ["channel-capability-matrix", "channelCapabilityMatrixPath"],
           ["channel-driver-smoke", "channelDriverSmokePath"],
-        ]) {
+        ] as const) {
           const declared = readStringValue(run?.[field]);
           if (declared) {
             const target = await resolveArtifactFileWithinRoots({

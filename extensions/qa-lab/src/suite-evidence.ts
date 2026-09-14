@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
-  isRepoRootRelativeRef,
   repoRootTokenArtifactPath,
   resolveQaArtifactPath,
   toRepoRelativePath,
@@ -38,8 +37,10 @@ export function rebaseQaSuiteEvidence(summary: QaEvidenceSummaryJson, from: stri
     if (
       artifact.source === "qa-suite" &&
       repoRootTokenArtifactPath(artifact.path) === null &&
-      isRepoRootRelativeRef(artifact.path)
+      !path.isAbsolute(artifact.path)
     ) {
+      // Parent receipts become ../ paths inside an isolated worker. Rebase
+      // those too so returning history preserves its immutable artifact identity.
       artifact.path = toRepoRelativePath(to, path.resolve(from, artifact.path));
     }
   }

@@ -288,9 +288,9 @@ async function runQaTestFileScenario(params: {
   return {
     ...result,
     ...producerEvidenceResult,
-    ...statusFromProducerEvidence({
+    ...statusFromProducerEntries({
       allowBlockedEvidence: params.scenario.execution.allowBlockedEvidence === true,
-      producerEvidence: producerEvidenceResult.producerEvidence,
+      entries: getEffectiveQaEvidenceEntries(producerEvidenceResult.producerEvidence),
     }),
   };
 }
@@ -345,12 +345,11 @@ function buildExecutionUnits(params: {
   return units;
 }
 
-function statusFromProducerEvidence(params: {
+function statusFromProducerEntries(params: {
   allowBlockedEvidence: boolean;
-  producerEvidence: QaEvidenceSummaryJson | undefined;
+  entries: readonly QaEvidenceSummaryJson["entries"][number][];
 }): Pick<QaTestFileScenarioResult, "failureMessage" | "status"> {
-  const { allowBlockedEvidence, producerEvidence } = params;
-  const entries = producerEvidence ? getEffectiveQaEvidenceEntries(producerEvidence) : [];
+  const { allowBlockedEvidence, entries } = params;
   if (entries.length === 0) {
     return {
       failureMessage: "Script exited successfully without reporting an executed producer check.",
@@ -582,9 +581,9 @@ export async function runQaTestFileScenarios(
               parentCell: null,
               scenario: null,
               retryOf: null,
-              terminalStatus: statusFromProducerEvidence({
+              terminalStatus: statusFromProducerEntries({
                 allowBlockedEvidence: false,
-                producerEvidence: producer,
+                entries: getEffectiveQaEvidenceEntries(producer),
               }).status,
               assertions: null,
               launch,
@@ -608,11 +607,11 @@ export async function runQaTestFileScenarios(
       const hasProducerEntries = (producer?.entries.length ?? 0) > 0;
       invocation.complete(id, {
         status: hasProducerEntries
-          ? statusFromProducerEvidence({
+          ? statusFromProducerEntries({
               allowBlockedEvidence:
                 result.scenario.execution.kind === "script" &&
                 result.scenario.execution.allowBlockedEvidence === true,
-              producerEvidence: producer,
+              entries: producer?.entries ?? [],
             }).status
           : result.status,
         // Legacy reporters bind only to this observed invocation, never inferred
@@ -628,7 +627,14 @@ export async function runQaTestFileScenarios(
       const selected = invocation.selectedObservation(index)!;
       const first = selected.entries[0];
       result.status = selected.occurrence.terminalStatus ?? "fail";
-      result.failureMessage = first?.result.failure?.reason;
+      // Reuse producer precedence and fallback text: its first row may pass
+      // while a later check owns the retained attempt's failure.
+      result.failureMessage = statusFromProducerEntries({
+        allowBlockedEvidence:
+          result.scenario.execution.kind === "script" &&
+          result.scenario.execution.allowBlockedEvidence === true,
+        entries: selected.entries,
+      }).failureMessage;
       result.durationMs = first?.result.timing?.wallMs ?? 0;
       const log = selected.occurrence.receipts.find((receipt) => receipt.artifact.kind === "log");
       if (log) {

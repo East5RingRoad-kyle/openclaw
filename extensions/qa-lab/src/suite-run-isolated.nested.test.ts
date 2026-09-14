@@ -1,7 +1,10 @@
 // Register shared mocks before loading the real suite modules.
 import "./suite-run-isolated.test-mocks.js";
+import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { projectQaEvidenceScenarioOutcomes } from "./evidence-summary.js";
 import type { QaLabServerHandle } from "./lab-server.types.js";
 import * as scenarioCatalog from "./scenario-catalog.js";
 import { runQaFlowSuiteIsolated } from "./suite-run-isolated.js";
@@ -18,6 +21,104 @@ import type { QaSuiteRunner, QaSuiteScenarioResult, QaSuiteScenarioRunner } from
 import * as suite from "./suite.js";
 
 describe("isolated QA suite nested publication", () => {
+  it.each(
+    (["full", "slim"] as const).flatMap((evidenceMode) =>
+      (["pass", "skip"] as const).map((status) => ({ evidenceMode, status })),
+    ),
+  )(
+    "continues completed parent history through a real isolated $status child in $evidenceMode mode",
+    async ({ evidenceMode, status }) => {
+      const context = createCleanupTestContext();
+      context.repoRoot = await tempDirs.makeTempDir("qa-isolated-continuation-");
+      context.outputDir = path.join(context.repoRoot, "output");
+      context.channelDriver = undefined;
+      const scenario = context.selectedScenarios[0]!;
+      if (scenario.execution.kind !== "flow") {
+        throw new Error("expected flow scenario");
+      }
+      scenario.execution.retryCount = 0;
+      mocks.writeQaSuiteArtifacts.mockImplementation(async (params) => ({
+        evidence: params.recordedEvidence,
+        evidencePath: path.join(params.outputDir, "qa-evidence.json"),
+        summaryPath: path.join(params.outputDir, "qa-suite-summary.json"),
+        reportPath: path.join(params.outputDir, "qa-suite-report.md"),
+        report: "",
+      }));
+      let nextStatus: "pass" | "fail" | "skip" = "fail";
+      const runScenario = vi.fn<QaSuiteScenarioRunner>().mockImplementation(async () => ({
+        name: context.selectedScenarios[0]!.title,
+        status: nextStatus,
+        steps: [],
+        details: nextStatus === "fail" ? "original child failure" : "later child result",
+      }));
+      const runChild: QaSuiteRunner = async (params) => {
+        if (!params?.outputDir) {
+          throw new Error("expected owned child output");
+        }
+        return runQaFlowSuiteStandard(
+          params,
+          { ...context, outputDir: params.outputDir },
+          runScenario,
+        );
+      };
+      const params = {
+        evidenceMode,
+        startLab: async () => createCleanupTestLab(),
+      };
+      const first = await runQaFlowSuiteIsolated(params, context, runChild);
+      if (first.evidence?.schemaVersion !== 3) {
+        throw new Error("expected invocation evidence");
+      }
+      const original = structuredClone(first.evidence);
+      const observations = original.occurrences.filter(
+        (item) => item.scenario?.kind === "observation",
+      );
+      expect(observations).toHaveLength(2);
+      expect(observations.every((item) => item.terminalStatus === "fail")).toBe(true);
+      const artifacts = await Promise.all(
+        observations.flatMap((item) =>
+          item.receipts.map(async ({ artifact }) => ({
+            artifact,
+            bytes: await fs.readFile(path.resolve(context.outputDir, artifact.path)),
+          })),
+        ),
+      );
+      nextStatus = status;
+      const continued = await runQaFlowSuiteIsolated(
+        {
+          ...params,
+          evidenceAnchors: original.occurrences.filter(
+            (item) => item.scenario?.kind === "instance",
+          ),
+          evidenceContinuation: original,
+        },
+        context,
+        runChild,
+      );
+      if (continued.evidence?.schemaVersion !== 3) {
+        throw new Error("expected continued invocation evidence");
+      }
+      expect(runScenario).toHaveBeenCalledTimes(2);
+      expect(continued.scenarios[0]?.status).toBe(status === "pass" ? "pass" : "fail");
+      expect(projectQaEvidenceScenarioOutcomes(continued.evidence)[0]?.status).toBe(
+        status === "pass" ? "pass" : "fail",
+      );
+      if (status === "skip") {
+        expect(continued.scenarios[0]).toEqual(first.scenarios[0]);
+      }
+      for (const occurrence of observations) {
+        expect(continued.evidence.occurrences.find((item) => item.id === occurrence.id)).toEqual(
+          occurrence,
+        );
+      }
+      for (const { artifact, bytes } of artifacts) {
+        expect(await fs.readFile(path.resolve(context.outputDir, artifact.path))).toEqual(bytes);
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(artifact.sha256);
+      }
+      expect(first.evidence).toEqual(original);
+    },
+  );
+
   it("preserves repeated isolated starts and independent progress slots", async () => {
     const lab = createCleanupTestLab();
     const context = createCleanupTestContext();
