@@ -106,7 +106,7 @@ async function expectTelegramProviderCorrelation(params: {
         ...(params.threadId ? { threadId: params.threadId } : {}),
       });
     } finally {
-      await transport.cleanup?.();
+      await transport.cleanupAfterGatewayStop();
     }
   });
 }

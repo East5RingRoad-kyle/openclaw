@@ -48,7 +48,7 @@ describe("crabline transport responses", () => {
           }),
         ).rejects.toThrow("JSON response exceeds 1048576 bytes");
       } finally {
-        await transport.cleanup?.();
+        await transport.cleanupAfterGatewayStop();
       }
     });
   });
@@ -84,7 +84,7 @@ describe("crabline transport responses", () => {
         ).rejects.toThrow("Crabline telegram inbound injection failed with HTTP 503");
         expect(cancel).toHaveBeenCalledOnce();
       } finally {
-        await transport.cleanup?.();
+        await transport.cleanupAfterGatewayStop();
       }
     });
   });
