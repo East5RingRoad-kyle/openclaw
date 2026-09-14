@@ -36,12 +36,13 @@ import {
 import { verifyModelSetup } from "./rpc.ts";
 import {
   activationTargetId,
-  initialWizardValue,
+  updateModelSetupWizardDraft,
   mapActivationResult,
   type ModelSetupActivationState,
   type ModelSetupPageState,
   type ModelSetupVerifyState,
   type ModelSetupWizardState,
+  type ModelSetupWizardDraft,
 } from "./state.ts";
 import { renderModelSetup, revealModelSetupFeedback } from "./view.ts";
 import { ModelSetupWizardRunner, type ModelSetupWizardCompletion } from "./wizard-runner.ts";
@@ -67,7 +68,7 @@ export class ModelSetupPage extends OpenClawLightDomElement {
   @state() private verifyState: ModelSetupVerifyState = { phase: "idle" };
   @state() private wizardState: ModelSetupWizardState = { phase: "idle" };
   @state() private wizardMode: "auth" | "prepare" | "activate" = "auth";
-  @state() private wizardValue: unknown;
+  @state() private wizardDraft: ModelSetupWizardDraft = { stepId: null, value: undefined };
   @state() private manualProviderId = "";
   @state() private manualApiKey = "";
   @state() private manualError: string | null = null;
@@ -123,13 +124,10 @@ export class ModelSetupPage extends OpenClawLightDomElement {
       if (next.phase !== "starting" && next.phase !== "done") {
         this.activationState = { phase: "idle" };
       }
-      const previousStep = this.wizardState.phase === "step" ? this.wizardState.step.id : null;
       this.wizardState =
         next.phase === "step" && this.wizardMutationActive ? { ...next, busy: true } : next;
-      if (next.phase === "step" && next.step.id !== previousStep) {
-        this.wizardValue = initialWizardValue(next.step);
-      } else if (next.phase === "idle") {
-        this.wizardValue = undefined;
+      this.wizardDraft = updateModelSetupWizardDraft(this.wizardDraft, next);
+      if (next.phase === "idle") {
         this.cancellationNotice = null;
       }
     },
@@ -214,8 +212,7 @@ export class ModelSetupPage extends OpenClawLightDomElement {
   }
 
   override updated(changed: PropertyValues) {
-    // Lit can finish queued updates after detachment; teardown must not rearm
-    // detection, icon fetches, or first-run activation on an abandoned page.
+    // Do not rearm setup work when Lit finishes queued updates after detachment.
     if (!this.isConnected) {
       return;
     }
@@ -656,13 +653,19 @@ export class ModelSetupPage extends OpenClawLightDomElement {
       agentLabel: this.agentLabel,
       credentialChoices: this.credentialChoices,
       onClose: this.onClose,
+      onDiscoveryShown: () => {
+        if (this.wizardState.phase === "idle") {
+          this.wizardReturnFocus?.focus({ preventScroll: true });
+          this.wizardReturnFocus = null;
+        }
+      },
       onConnectChoice: this.onConnectChoice,
       page: this.firstRun.visiblePageState(this.verifyState.phase === "ok"),
       activation: this.activationState,
       verify: this.verifyState,
       wizard: this.wizardState,
       wizardMode: this.wizardMode,
-      wizardValue: this.wizardValue,
+      wizardValue: this.wizardDraft.value,
       canAdmin,
       canVerify,
       canPrepare:
@@ -727,7 +730,7 @@ export class ModelSetupPage extends OpenClawLightDomElement {
         this.activationState = { phase: "idle" };
         void this.detect();
       },
-      onWizardValueChange: (value) => (this.wizardValue = value),
+      onWizardValueChange: (value) => (this.wizardDraft = { ...this.wizardDraft, value }),
       onWizardAnswer: (value, includeValue) =>
         void this.runWizardMutation(() => this.wizard.answer(value, includeValue)),
       onWizardCancel: () => void this.cancelWizard(),

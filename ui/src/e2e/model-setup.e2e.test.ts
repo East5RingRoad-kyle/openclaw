@@ -1,45 +1,17 @@
 // Control UI tests cover guided model setup against a mocked Gateway.
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { Page } from "playwright";
 import { beforeEach, expect, it } from "vitest";
 import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
 import { takeControlUiViewportScreenshot } from "../test-helpers/control-ui-e2e-screenshot.ts";
-import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { installSetupGateway, openModelSetup } from "./model-setup.test-support.ts";
 
 const suite = createControlUiE2eSuite({
   name: "Control UI Model Setup mocked Gateway E2E",
   startServerBeforeBrowser: true,
   unavailableMessage: (executablePath) => `Playwright Chromium is unavailable at ${executablePath}`,
 });
-
-// These cases exercise advanced setup through Models, with credential-only
-// choices intentionally absent so manual-only setup stays available.
-function installSetupGateway(page: Page, options: Parameters<typeof installMockGateway>[1]) {
-  return installMockGateway(page, {
-    ...options,
-    featureMethods: [
-      "config.get",
-      "config.patch",
-      "models.authStatus",
-      "models.list",
-      ...(options?.featureMethods ?? []),
-    ],
-    methodResponses: {
-      "models.authStatus": { ts: 1, providers: [], providerCapabilities: [] },
-      ...options?.methodResponses,
-    },
-  });
-}
-
-async function openModelSetup(page: Page) {
-  const response = await page.goto(`${suite.server.baseUrl}settings/model-setup`);
-  await page.locator("[data-models-login-discover]").click();
-  await page.getByRole("heading", { name: "On this Gateway", exact: true }).waitFor();
-  expect(new URL(page.url()).pathname).toBe("/settings/model-providers");
-  return response;
-}
 
 const artifactRoot = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR?.trim();
 let artifactDir: string | undefined;
@@ -111,7 +83,7 @@ suite.define(() => {
           },
         });
 
-        await openModelSetup(page);
+        await openModelSetup(page, suite.server.baseUrl);
         const row = page.locator('[data-candidate-kind="codex-cli"]');
         await expect.poll(() => row.textContent()).toContain("ChatGPT account · alex@example.com");
         if (artifactDir) {
@@ -332,7 +304,7 @@ suite.define(() => {
           },
         });
 
-        const response = await openModelSetup(page);
+        const response = await openModelSetup(page, suite.server.baseUrl);
         expect(response?.status()).toBe(200);
         const configReadsBeforeStart = (await gateway.getRequests("config.get")).length;
         await gateway.deferNext("config.get");
@@ -513,7 +485,7 @@ suite.define(() => {
           },
         });
 
-        const response = await openModelSetup(page);
+        const response = await openModelSetup(page, suite.server.baseUrl);
         expect(response?.status()).toBe(200);
         const localProviderIcons = page.locator(
           [
@@ -728,7 +700,7 @@ suite.define(() => {
           },
         });
 
-        const response = await openModelSetup(page);
+        const response = await openModelSetup(page, suite.server.baseUrl);
         expect(response?.status()).toBe(200);
         await page.getByRole("heading", { name: "On this Gateway", exact: true }).waitFor();
         await expect.poll(() => page.getByText("Gemini CLI OAuth").count()).toBe(0);
@@ -978,7 +950,7 @@ suite.define(() => {
           },
         },
       });
-      await openModelSetup(page);
+      await openModelSetup(page, suite.server.baseUrl);
       const panel = page.locator(".model-setup-discovery");
       const close = panel.getByRole("button", { name: "Close", exact: true });
       for (const width of [1280, 390]) {

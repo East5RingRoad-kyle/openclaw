@@ -67,6 +67,14 @@ export class ModelProviderDiscoveryController implements ReactiveController {
     this.host.requestUpdate();
   }
 
+  cancelLoading(): void {
+    // Once mounted, ModelSetupPage owns reconnect recovery and authority loss.
+    // Only an unfinished import belongs to the parent transport epoch.
+    if (this.state === "loading") {
+      this.reset();
+    }
+  }
+
   hostDisconnected(): void {
     this.reset();
   }

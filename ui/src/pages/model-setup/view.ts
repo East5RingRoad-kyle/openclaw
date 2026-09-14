@@ -1,4 +1,5 @@
 import { html, nothing, type TemplateResult } from "lit";
+import { cache } from "lit/directives/cache.js";
 import type { SystemAgentSetupDetectResult } from "../../api/types.ts";
 import { subtitleForRoute, titleForRoute } from "../../app-navigation.ts";
 import { icons } from "../../components/icons.ts";
@@ -31,6 +32,7 @@ type ModelSetupViewProps = {
   agentLabel?: string;
   credentialChoices?: readonly string[];
   onClose?: () => void;
+  onDiscoveryShown?: () => void;
   onConnectChoice?: (authChoice?: string) => void;
   detecting?: boolean;
   detectionError?: string | null;
@@ -681,12 +683,17 @@ export function renderModelSetup(props: ModelSetupViewProps): TemplateResult {
   if (props.embedded) {
     const wizardOpen = props.wizard.phase !== "idle" || props.activation.phase === "success";
     return html`
-      ${
+      ${cache(
         wizardOpen
           ? nothing
           : html`<openclaw-modal-dialog
               label=${t("modelSetup.discovery.title")}
               @modal-cancel=${() => props.onClose?.()}
+              @wa-after-show=${(event: Event) => {
+                if (event.target === event.currentTarget) {
+                  props.onDiscoveryShown?.();
+                }
+              }}
             >
               <div class="model-setup-wizard model-setup-discovery">
                 <div class="model-setup-wizard__body">${content}</div>
@@ -696,8 +703,8 @@ export function renderModelSetup(props: ModelSetupViewProps): TemplateResult {
                   </button>
                 </div>
               </div>
-            </openclaw-modal-dialog>`
-      }
+            </openclaw-modal-dialog>`,
+      )}
       ${dialogs}
     `;
   }

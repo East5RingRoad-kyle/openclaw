@@ -92,9 +92,13 @@ suite.define(() => {
             );
           expect(rows).toHaveLength(5);
           expect(rows.every((row) => (width > 640 ? row.sideBySide : row.stacked))).toBe(true);
-          const header = page.locator(".content-header--settings");
-          const bounds = await header
-            .locator(".agent-select__trigger, .page-header-actions > button")
+          expect(
+            await page.locator(".content-header--settings .agent-select__trigger").count(),
+          ).toBe(0);
+          const bounds = await page
+            .locator(
+              ".agent-select__trigger, [data-models-connect], .model-providers__refresh-button",
+            )
             .evaluateAll((buttons) =>
               buttons.map((button) => {
                 const { x, y, width: buttonWidth, height } = button.getBoundingClientRect();

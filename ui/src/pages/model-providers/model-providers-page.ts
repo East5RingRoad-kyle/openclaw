@@ -340,6 +340,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
       this.dataClient = null;
     }
     this.refreshPolicy.resetPayload();
+    this.discovery.cancelLoading();
     this.resetAgentScopeState();
     this.profileActions.resetProbes();
     this.defaultsDraft = null;
@@ -347,7 +348,6 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
 
   private resetAgentScopeState() {
     this.login.reset();
-    this.discovery.reset();
     this.busy = {};
     this.messages = {};
     this.probeResults = {};
@@ -370,6 +370,7 @@ export class ModelProvidersPage extends OpenClawLightDomElement {
     }
     this.selectedAgentId = agentId;
     this.agentEpoch += 1;
+    this.discovery.reset();
     this.resetAgentScopeState();
     return true;
   }
