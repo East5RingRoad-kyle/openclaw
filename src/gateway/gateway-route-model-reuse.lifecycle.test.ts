@@ -184,7 +184,10 @@ test("cancellation during agent.wait joins the registered route body before tear
         },
       );
       const endedEarly = outcome.then((error) => {
-        throw error ?? new Error("Route body ended before the controlled gate");
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error("Route body ended before the controlled gate", { cause: error });
       });
       void endedEarly.catch(() => {});
       await Promise.race([rpcEntered.promise, endedEarly]);
