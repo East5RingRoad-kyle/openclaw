@@ -174,9 +174,12 @@ function resolveFeishuButtonUrl(button: MessagePresentationButton): string | und
   return button.url ?? button.webApp?.url ?? button.web_app?.url;
 }
 
-function resolveFeishuCommandButtonValue(button: MessagePresentationButton): string | undefined {
+function resolveFeishuCallbackButtonValue(button: MessagePresentationButton): string | undefined {
   if (button.action?.type === "command") {
     return button.action.command;
+  }
+  if (button.action?.type === "question" && "optionValue" in button.action) {
+    return button.action.optionValue;
   }
   if (button.action) {
     return undefined;
@@ -227,7 +230,7 @@ function mapFeishuButtonType(style: MessagePresentationButton["style"]) {
 
 function buildFeishuPayloadButton(button: MessagePresentationButton): Record<string, unknown> {
   const url = resolveSafeFeishuButtonUrl(resolveFeishuButtonUrl(button));
-  const value = resolveFeishuCommandButtonValue(button);
+  const value = resolveFeishuCallbackButtonValue(button);
   if (button.disabled || (!url && !value)) {
     // Keep each unavailable control visible without exposing rejected URLs or opaque values.
     return { tag: "markdown", content: `- ${escapeFeishuCardPlainText(button.label)}` };
