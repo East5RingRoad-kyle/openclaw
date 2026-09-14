@@ -60,6 +60,8 @@ type SidebarPanelDefinitionParams = {
   pullRequests: ControlUiSessionPullRequest[];
   companion: ChatSessionCompanionThread;
   companionPresented: boolean;
+  companionFocusRequest: (() => boolean) | undefined;
+  canFocusCompanion: () => boolean;
   onCompanionSubmit: (question: string) => void;
   onCompanionDraftChange: (draft: string) => void;
   onCompanionVisibilityChange: (visible: boolean) => void;
@@ -170,6 +172,8 @@ export function sidebarPanelDefinitions(
     ? html`<openclaw-chat-session-rail
         embedded
         .presented=${params.companionPresented}
+        .focusRequest=${params.companionFocusRequest}
+        .canFocus=${params.canFocusCompanion}
         .sessionKey=${state?.sessionKey}
         .digest=${params.digest}
         .running=${Boolean(params.activeRunId)}
