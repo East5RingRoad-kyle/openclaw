@@ -127,6 +127,7 @@ export const agentVitestProjectOwners = {
     exclude: [
       ...spawnProductionBoundaryFiles,
       ...coreIsolatedFiles,
+      ...databaseWorkerCoreTestFiles,
       `${embeddedRoot}/**`,
       `${agentsRoot}/tools/**`,
     ],

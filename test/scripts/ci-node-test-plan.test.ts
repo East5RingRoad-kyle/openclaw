@@ -34,6 +34,7 @@ import {
   agentVitestProjectOwners,
   embeddedAgentVitestProjectOwners,
 } from "../vitest/vitest.agents-paths.mjs";
+import { createAgentsSupportVitestConfig } from "../vitest/vitest.agents-support.config.ts";
 import { createAgentsVitestConfig } from "../vitest/vitest.agents.config.ts";
 import { cliProcessTestFiles } from "../vitest/vitest.cli-process-paths.mjs";
 import { createCliProcessVitestConfig } from "../vitest/vitest.cli-process.config.ts";
@@ -3055,13 +3056,17 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
 
   it("keeps host-owned database consumers in forks and out of their former projects", () => {
     const infra = createInfraVitestConfig({});
+    const support = createAgentsSupportVitestConfig({});
     expect(infra.test?.pool).toBe("forks");
+    expect(infra.test?.setupFiles).toEqual(support.test?.setupFiles);
     const admitted = new Set(listMatchedTestFiles(infra));
+    expect(admitted.has("src/agents/sessions/sdk.auth-migration.test.ts")).toBe(true);
     const former = new Set(
       [
         createUnitVitestConfigWithOptions({}),
         createUnitFastVitestConfig(),
         createAgentsCoreVitestConfig({}),
+        support,
         createAgentsVitestConfig({}),
         createPluginSdkLightVitestConfig({}),
         createPluginSdkVitestConfig({}),

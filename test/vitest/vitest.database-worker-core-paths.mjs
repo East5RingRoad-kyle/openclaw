@@ -5,6 +5,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/agent-tools.create-openclaw-coding-tools.test.ts",
   "src/agents/memory-write-provenance.test.ts",
   "src/agents/prepared-model-runtime.run-resources.test.ts",
+  "src/agents/sessions/sdk.auth-migration.test.ts",
   "src/commands/doctor-maintenance.worker.test.ts",
   "src/entry.memory-json.test.ts",
   "src/gateway/server-methods/memory-search.test.ts",
