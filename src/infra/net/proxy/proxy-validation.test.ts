@@ -87,7 +87,7 @@ describe("proxy validation", () => {
         proxyUrl: "http://config-proxy.example:3128",
       },
       env: {
-        get OPENCLAW_PROXY_URL() {
+        get OPENCLAW_PROXY_URL(): string | undefined {
           throw new Error("configured proxy must not read environment");
         },
       },
