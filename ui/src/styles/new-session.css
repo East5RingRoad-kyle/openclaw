@@ -859,10 +859,6 @@ wa-popover.new-session-page__where-popover::part(body) {
   height: 14px;
 }
 
-.new-session-page__environment-skeleton-row:nth-child(2) {
-  width: 72%;
-}
-
 .new-session-page__menu-chevron {
   display: inline-flex;
   margin-left: auto;

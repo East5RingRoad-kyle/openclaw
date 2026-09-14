@@ -37,6 +37,10 @@ suite.define(() => {
         await loading.first().waitFor();
         expect(await loading.count()).toBe(2);
         expect(await loading.first().getAttribute("aria-busy")).toBe("true");
+        const skeletonWidths = await picker
+          .locator(".new-session-page__environment-skeleton-row")
+          .evaluateAll((rows) => rows.map((row) => Math.round(row.getBoundingClientRect().width)));
+        expect(new Set(skeletonWidths).size).toBe(1);
         if (captureUiProofEnabled) {
           await writeFile(
             path.join(suite.artifactDir, "environment-picker-loading-after.png"),
