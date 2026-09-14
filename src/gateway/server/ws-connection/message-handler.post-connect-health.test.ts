@@ -963,7 +963,7 @@ describe("attachGatewayWsMessageHandler post-connect health refresh", () => {
     expect(handleGatewayRequest).not.toHaveBeenCalled();
   });
 
-  it("retires pre-auth payload limits as soon as hello delivery succeeds", async () => {
+  it("accepts a valid large node skills update as soon as hello delivery succeeds", async () => {
     const close = createCloseMock();
     const harness = attachGatewayHarness({
       connId: "conn-large-request-after-hello",
@@ -977,11 +977,21 @@ describe("attachGatewayWsMessageHandler post-connect health refresh", () => {
 
     harness.finishSocketSend();
     await nextTurn();
-    harness.sendRequest("large-request-after-hello", "status.summary", {
-      payload: "x".repeat(MAX_PREAUTH_PAYLOAD_BYTES + 1),
+    harness.sendRequest("large-node-skills-after-hello", "node.skills.update", {
+      skills: [
+        {
+          name: "large-skill",
+          description: "A valid skill whose content makes the request exceed the pre-auth limit",
+          content: "x".repeat(64 * 1024),
+        },
+      ],
     });
 
     await waitForFast(() => expect(handleGatewayRequest).toHaveBeenCalledOnce());
+    expect(vi.mocked(handleGatewayRequest).mock.calls[0]?.[0].req).toMatchObject({
+      id: "large-node-skills-after-hello",
+      method: "node.skills.update",
+    });
     expect(close).not.toHaveBeenCalled();
   });
 
