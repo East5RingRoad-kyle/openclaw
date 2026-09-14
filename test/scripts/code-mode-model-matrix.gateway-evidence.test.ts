@@ -133,7 +133,7 @@ it.each([false, true])(
                 .filter((handler) => !previousSigintListeners.includes(handler));
               expect(handlers).toHaveLength(1);
               for (const handler of handlers) {
-                handler();
+                handler("SIGINT");
               }
               expect(process.rawListeners("SIGINT")).toEqual(previousSigintListeners);
               expect(params.abortSignal?.aborted).toBe(true);
