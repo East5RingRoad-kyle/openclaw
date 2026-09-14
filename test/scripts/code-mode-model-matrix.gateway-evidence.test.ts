@@ -75,6 +75,8 @@ it.each([false, true])(
     await fs.writeFile(baselineResults, baselineRows.map((row) => JSON.stringify(row)).join("\n"));
     const outputDir = path.join(repoRoot, "artifacts");
     let calls = 0;
+    const previousSigintListeners = process.rawListeners("SIGINT");
+    const previousSigtermListeners = process.rawListeners("SIGTERM");
     const run = runCodeModeModelMatrix(
       {
         allowFailures: false,
@@ -124,7 +126,16 @@ it.each([false, true])(
           );
           if (calls === 2) {
             if (interrupted) {
-              process.emit("SIGINT");
+              // Invoke only the matrix's registered once-wrapper; broadcasting
+              // SIGINT also shuts down the surrounding Vitest worker.
+              const handlers = process
+                .rawListeners("SIGINT")
+                .filter((handler) => !previousSigintListeners.includes(handler));
+              expect(handlers).toHaveLength(1);
+              for (const handler of handlers) {
+                handler();
+              }
+              expect(process.rawListeners("SIGINT")).toEqual(previousSigintListeners);
               expect(params.abortSignal?.aborted).toBe(true);
             }
             throw new Error("synthetic Gateway cell failed");
@@ -170,6 +181,8 @@ it.each([false, true])(
         runtimeSha,
       ]);
     }
+    expect(process.rawListeners("SIGINT")).toEqual(previousSigintListeners);
+    expect(process.rawListeners("SIGTERM")).toEqual(previousSigtermListeners);
     expect(calls).toBe(interrupted ? 2 : 3);
     const manifest = JSON.parse(await fs.readFile(path.join(outputDir, "manifest.json"), "utf8"));
     expect(manifest).toMatchObject({
