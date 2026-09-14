@@ -1,8 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { theme } from "../../../packages/terminal-core/src/theme.js";
+import { resolveStateDir } from "../../config/paths.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { PackageUpdateTransaction } from "../../infra/package-update-steps.js";
 import { hasNodeErrorCode } from "../../infra/path-guards.js";
 import { mergeProcessEnv } from "../../infra/process-env.js";
+import { assessInitialUpdateSnapshotCapacity } from "../../infra/update-candidate-snapshot.js";
 import {
   DEV_BRANCH,
   resolveDevUpstreamRefs,
@@ -12,7 +16,6 @@ import {
   resolveDevUpdateTargetRevision,
   type DevUpdateTarget,
 } from "../../infra/update-dev-target.js";
-import { UPDATE_DISK_SPACE_FAILURE_REASON } from "../../infra/update-disk-space.js";
 import {
   createGlobalInstallEnv,
   verifyPackageUpdateRecovery,
@@ -51,11 +54,9 @@ import {
 } from "./shared.js";
 import {
   prepareGitPackageExposure,
-  preflightUpdateInstallCapacity,
   readPackageUpdateIdentity,
   runPackageUpdateDoctor,
 } from "./update-command-package.js";
-import { resolveUpdateTargetEnv } from "./update-command-service-env.js";
 import { gatewayServiceCommandUsesRoot } from "./update-command-service-plan.js";
 import {
   resolvePreparedGatewayUpdatePolicy,
@@ -455,7 +456,7 @@ export async function updateGitInstall(params: {
   onConfigSnapshot?: Parameters<typeof runPackageUpdateDoctor>[0]["onConfigSnapshot"];
   getDoctorContext?: Parameters<typeof runPackageUpdateDoctor>[0]["getDoctorContext"];
   getManagedServiceEnv: () => NodeJS.ProcessEnv | undefined;
-  capacityEnv?: NodeJS.ProcessEnv;
+  getSnapshotSource: () => Promise<{ config: OpenClawConfig; env: NodeJS.ProcessEnv }>;
   jsonMode?: boolean;
   invocationCwd?: string;
   nodeRunner?: string;
@@ -499,35 +500,43 @@ export async function updateGitInstall(params: {
     };
   }
 
-  const checkCapacity = (
-    gitTarget?: Parameters<NonNullable<UpdateRunnerOptions["beforeGitStaging"]>>[0],
-  ) =>
-    preflightUpdateInstallCapacity({
-      root: params.root,
-      gitRoot: updateRoot,
-      sourceGitRoot: params.switchToGit ? undefined : params.root,
-      gitTarget,
-      timeoutMs: effectiveTimeout,
-      installTarget: installTarget ?? undefined,
-      env: resolveUpdateTargetEnv({
-        baseEnv: installEnv,
-        serviceEnv: params.getManagedServiceEnv() ?? params.capacityEnv,
-        invocationCwd: params.invocationCwd,
-      }),
-      progress: params.progress,
-      jsonMode: params.jsonMode === true,
+  const checkSnapshot = async () => {
+    const info = {
+      name: "snapshot-space-preflight",
+      command: "snapshot-space-preflight",
+      index: 0,
+      total: 0,
+    };
+    params.progress.onStepStart?.(info);
+    const { config, env } = await params.getSnapshotSource();
+    const snapshot = await assessInitialUpdateSnapshotCapacity({
+      config,
+      stateDir: resolveStateDir(env),
+      env,
     });
-  const capacity = params.switchToGit ? await checkCapacity() : undefined;
-  if (capacity && capacity.exitCode !== 0) {
+    params.progress.onStepComplete?.({ ...snapshot, index: 0, total: 0 });
+    if (snapshot.exitCode !== 0) {
+      defaultRuntime.error(snapshot.stderrTail ?? "snapshot-capacity-insufficient");
+    } else {
+      for (const warning of snapshot.warnings ?? []) {
+        if (params.jsonMode) {
+          defaultRuntime.error(`Warning: ${warning}`);
+        } else {
+          defaultRuntime.log(theme.warn(warning));
+        }
+      }
+    }
+    return snapshot;
+  };
+  const snapshotBeforeClone = params.switchToGit ? await checkSnapshot() : undefined;
+  if (snapshotBeforeClone && snapshotBeforeClone.exitCode !== 0) {
     return {
       status: "error",
       mode: "git",
       root: params.root,
-      reason: UPDATE_DISK_SPACE_FAILURE_REASON,
-      steps: [capacity],
-      recovery: await (params.installKind === "git"
-        ? readCurrentGitUpdateRecovery(params.root, effectiveTimeout)
-        : verifyPackageUpdateRecovery(params.root)),
+      reason: "snapshot-capacity-insufficient",
+      steps: [snapshotBeforeClone],
+      recovery: await verifyPackageUpdateRecovery(params.root),
       durationMs: Date.now() - params.startedAt,
     };
   }
@@ -552,9 +561,9 @@ export async function updateGitInstall(params: {
       inspectGitTarget: params.inspectGitTarget,
       beforeGitStaging: params.switchToGit
         ? undefined
-        : async (target) => ({
-            step: await checkCapacity(target),
-            failureReason: UPDATE_DISK_SPACE_FAILURE_REASON,
+        : async () => ({
+            step: await checkSnapshot(),
+            failureReason: "snapshot-capacity-insufficient",
           }),
       publishGitCheckout,
       validateCandidate: params.validateCandidate,
@@ -631,7 +640,7 @@ export async function updateGitInstall(params: {
         recovery: await (params.installKind === "git"
           ? readCurrentGitUpdateRecovery(params.root, effectiveTimeout)
           : verifyPackageUpdateRecovery(params.root)),
-        steps: [...(capacity ? [capacity] : []), cloneStep],
+        steps: [...(snapshotBeforeClone ? [snapshotBeforeClone] : []), cloneStep],
         durationMs: Date.now() - params.startedAt,
       };
     }
@@ -639,7 +648,7 @@ export async function updateGitInstall(params: {
     const updateResult = stagedUpdateResult ?? (await runUpdate(updateRoot));
     const before = previousPackage ?? updateResult.before;
     const steps = [
-      ...(capacity ? [capacity] : []),
+      ...(snapshotBeforeClone ? [snapshotBeforeClone] : []),
       ...(cloneStep ? [cloneStep] : []),
       ...updateResult.steps,
     ];

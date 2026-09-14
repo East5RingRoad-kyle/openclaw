@@ -113,7 +113,6 @@ describe("system.info", () => {
       vi.spyOn(diskSpace, "tryReadDiskSpace").mockImplementation((targetPath) => ({
         targetPath,
         checkedPath: targetPath,
-        deviceId: 1,
         totalBytes: 2048,
         availableBytes: 1024,
       }));

@@ -211,7 +211,6 @@ it.each([false, true])(
     vi.spyOn(diskSpace, "tryReadDiskSpace").mockImplementation((targetPath) => ({
       targetPath,
       checkedPath: targetPath,
-      deviceId: targetPath === `${f.stateDir}.update-captures` ? 1 : 2,
       availableBytes: !full && targetPath === `${f.stateDir}.update-captures` ? 10 * 1024 ** 3 : 0,
       totalBytes: 10 * 1024 ** 3,
     }));
@@ -267,7 +266,6 @@ it.skipIf(process.platform === "win32")(
     vi.spyOn(diskSpace, "tryReadDiskSpace").mockImplementation((targetPath) => ({
       targetPath,
       checkedPath: targetPath,
-      deviceId: targetPath === "/tmp" ? 1 : 2,
       availableBytes: targetPath === "/tmp" ? 1024 ** 3 : 0,
       totalBytes: 1024 ** 3,
     }));
@@ -310,7 +308,6 @@ it.each([
       : {
           targetPath,
           checkedPath: targetPath,
-          deviceId: targetPath === nominated ? 1 : targetPath === sibling ? 2 : 3,
           availableBytes,
           totalBytes: 1024 ** 3,
         };
@@ -341,7 +338,6 @@ it("skips an explicit temporary path that is a file without changing it", async 
   vi.spyOn(diskSpace, "tryReadDiskSpace").mockImplementation((targetPath) => ({
     targetPath,
     checkedPath: path.dirname(targetPath),
-    deviceId: 1,
     availableBytes: 1024 ** 3,
     totalBytes: 1024 ** 3,
   }));
@@ -412,7 +408,6 @@ it.each([false, true])(
     vi.spyOn(diskSpace, "tryReadDiskSpace").mockImplementation((targetPath) => ({
       targetPath,
       checkedPath: targetPath,
-      deviceId: targetPath === sibling ? 1 : 2,
       availableBytes: !full && targetPath === sibling ? 1024 ** 3 : 128 * 1024 ** 2,
       totalBytes: 1024 ** 3,
     }));

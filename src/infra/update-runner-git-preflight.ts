@@ -103,16 +103,13 @@ function resolvePreflightWorktreeDir(preflightRoot: string) {
   return path.join(preflightRoot, PREFLIGHT_WORKTREE_DIRNAME);
 }
 
-export function resolveGitPreflightBaseDir(gitRoot: string): string {
-  return process.platform === "win32" && path.sep === "\\"
-    ? path.win32.join(process.env.SystemDrive ?? "C:", WINDOWS_PREFLIGHT_BASE_DIR)
-    : path.join(gitRoot, ".artifacts");
-}
-
 async function createPreflightRoot(gitRoot: string) {
   // On POSIX, ignored artifact storage keeps interrupted worktrees out of Git status.
   // Honor existing redirects like build-all-cache; only the mkdtemp child is private.
-  const baseDir = resolveGitPreflightBaseDir(await fs.realpath(gitRoot));
+  const baseDir =
+    process.platform === "win32" && path.sep === "\\"
+      ? path.win32.join(process.env.SystemDrive ?? "C:", WINDOWS_PREFLIGHT_BASE_DIR)
+      : path.join(await fs.realpath(gitRoot), ".artifacts");
   await fs.mkdir(baseDir, { recursive: true });
   return fs.mkdtemp(path.join(baseDir, PREFLIGHT_TEMP_PREFIX));
 }
@@ -604,12 +601,7 @@ export async function runGitCandidatePreflight(params: {
     return { status: "skipped", reason: "already-current" };
   }
   if (params.beforeGitStaging) {
-    const admission = await params.beforeGitStaging({
-      sourceRoot: params.gitRoot,
-      revision: preflightBaseSha,
-      stagingRoot: resolveGitPreflightBaseDir(await fs.realpath(params.gitRoot)),
-      runCommand: params.runCommand,
-    });
+    const admission = await params.beforeGitStaging();
     params.steps.push(admission.step);
     if (admission.step.exitCode !== 0) {
       return { status: "error", reason: admission.failureReason };
