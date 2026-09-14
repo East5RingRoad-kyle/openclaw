@@ -94,13 +94,16 @@ describe("producer coverage claims", () => {
             artifacts: [
               {
                 ...original.execution?.artifacts[0],
-                path: path.relative(
-                  repoRoot,
-                  path.join(
-                    path.dirname(result.results[0]!.logPath),
-                    "scenario-script/run-1/producer.log",
-                  ),
-                ),
+                path: `<repo-root>/${path
+                  .relative(
+                    repoRoot,
+                    path.join(
+                      path.dirname(result.results[0]!.logPath),
+                      "scenario-script/run-1/producer.log",
+                    ),
+                  )
+                  .split(path.sep)
+                  .join("/")}`,
               },
             ],
           });

@@ -256,7 +256,8 @@ export async function runQaFlowSuiteStandard(
       let scenarioExecutionStartedAt = scenarioBootstrapFinishedAt;
       let scenarioExecutionFinishedAt = scenarioBootstrapFinishedAt;
       let previousAttempt = recording.invocation.previousFailure(index);
-      const runSelectedScenario = async () => {
+      const recorded: { selected?: QaSuiteScenarioResult } = {};
+      const runObservedScenario = async () => {
         // Retry backoff and unsuccessful attempts are not part of the final
         // runtime turn, and they must not be relabeled as gateway bootstrap.
         scenarioExecutionStartedAt = new Date();
@@ -280,19 +281,21 @@ export async function runQaFlowSuiteStandard(
         } finally {
           scenarioExecutionFinishedAt = new Date();
         }
-        const recorded = await recording.record(index, id, result, {
+        recorded.selected = await recording.record(index, id, result, {
           env: activeEnv,
           selectedId: previousAttempt !== null && result.status !== "pass" ? previousAttempt : id,
         });
         previousAttempt = id;
-        return recorded;
+        // Flake retry follows this attempt, not a retained failure from an
+        // earlier invocation. Reporting still uses the owner's selected result.
+        return { ...result, evidenceOccurrenceId: id };
       };
       const scenarioRetryCount =
         scenario.execution.kind === "flow" ? scenario.execution.retryCount : undefined;
       let scenarioResult: QaSuiteScenarioResult =
         params?.captureRuntimeParityCell || scenarioRetryCount === 0
-          ? await runSelectedScenario()
-          : await runQaScenarioWithFlakeRetry(runSelectedScenario, () => {
+          ? await runObservedScenario()
+          : await runQaScenarioWithFlakeRetry(runObservedScenario, () => {
               // Both attempts share append-only Gateway logs. Retain the failed
               // attempt through final cleanup even when its retry passes.
               preserveGatewayRuntimeDir = path.join(outputDir, "artifacts", "gateway-runtime");
@@ -301,6 +304,12 @@ export async function runQaFlowSuiteStandard(
                 `scenario retry (${index + 1}/${selectedScenarios.length}): ${scenarioIdForLog}`,
               );
             });
+      if (
+        recorded.selected &&
+        recorded.selected.evidenceOccurrenceId !== scenarioResult.evidenceOccurrenceId
+      ) {
+        scenarioResult = recorded.selected;
+      }
       if (scenarioResult.status === "pass" && params?.roundTripProbe?.scenarioId === scenario.id) {
         const probeOccurrenceId = recording.invocation.begin(index, null);
         let probeResult: Awaited<ReturnType<typeof runQaSuiteRoundTripProbe>>;

@@ -47,7 +47,7 @@ function vitestArtifactEvidence(params: {
   id: string;
   title: string;
   artifact: { kind: string; path: string };
-}): QaEvidenceSummaryJson {
+}): Extract<QaEvidenceSummaryJson, { schemaVersion: 2 }> {
   return {
     kind: "openclaw.qa.evidence-summary",
     schemaVersion: 2,

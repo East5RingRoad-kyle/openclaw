@@ -133,7 +133,7 @@ describe("qa test file scenario runner", () => {
         artifacts: [
           {
             kind: "log",
-            path: path.relative(repoRoot, result.results[0]!.logPath),
+            path: `<repo-root>/${path.relative(repoRoot, result.results[0]!.logPath).split(path.sep).join("/")}`,
             source: "playwright",
           },
         ],
@@ -227,7 +227,7 @@ describe("qa test file scenario runner", () => {
         artifacts: [
           {
             kind: "log",
-            path: path.relative(repoRoot, result.results[0]!.logPath),
+            path: `<repo-root>/${path.relative(repoRoot, result.results[0]!.logPath).split(path.sep).join("/")}`,
             source: "vitest",
           },
         ],

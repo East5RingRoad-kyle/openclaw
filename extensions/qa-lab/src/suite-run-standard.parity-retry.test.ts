@@ -275,6 +275,80 @@ describe("QA runtime parity scenario retry isolation", () => {
     },
   );
 
+  it.each(["skip", "pass", "fail"] as const)(
+    "retries only observed failures when a captured failure continues to %s",
+    async (status) => {
+      const context = makeRetryTestContext();
+      const scenario = context.selectedScenarios[0]!;
+      if (scenario.execution.kind !== "flow") {
+        throw new Error("expected flow scenario");
+      }
+      scenario.execution.retryCount = 0;
+      const captured: QaEvidenceSummaryV3Json[] = [];
+      const first = await runQaFlowSuiteStandard(
+        { lab: makeRetryTestLab(), onEvidence: (summary) => captured.push(summary) },
+        context,
+        vi.fn<QaSuiteScenarioRunner>().mockResolvedValue(makeRetryTestResult("fail")),
+      );
+      const original = structuredClone(captured.at(-1)!);
+      scenario.execution.retryCount = 1;
+      const runScenario = vi
+        .fn<QaSuiteScenarioRunner>()
+        .mockResolvedValueOnce({
+          ...makeRetryTestResult("fail"),
+          status: status === "skip" ? "skip" : "fail",
+          details: status === "skip" ? "not applicable" : "continued failure",
+        })
+        .mockResolvedValue(makeRetryTestResult(status === "skip" ? "pass" : status));
+      const result = await runQaFlowSuiteStandard(
+        {
+          lab: makeRetryTestLab(),
+          evidenceAnchors: original.occurrences.filter(
+            (occurrence) => occurrence.scenario?.kind === "instance",
+          ),
+          evidenceContinuation: original,
+          onEvidence: (summary) => captured.push(summary),
+        },
+        context,
+        runScenario,
+      );
+      expect(runScenario).toHaveBeenCalledTimes(status === "skip" ? 1 : 2);
+      const final = captured.at(-1)!;
+      const observations = final.occurrences.filter(
+        (occurrence) => occurrence.scenario?.kind === "observation",
+      );
+      expect(observations.map((occurrence) => occurrence.retryOf)).toEqual(
+        status === "skip"
+          ? [null, observations[0]!.id]
+          : [null, observations[0]!.id, observations[1]!.id],
+      );
+      expect(final.entries.map((entry) => entry.result.status)).toEqual(
+        status === "skip" ? ["fail", "skipped"] : ["fail", "fail", status],
+      );
+      expect(getEffectiveQaEvidenceEntries(final).map((entry) => entry.result.status)).toEqual([
+        status === "pass" ? "pass" : "fail",
+      ]);
+      expect(projectQaEvidenceScenarioOutcomes(final)[0]).toMatchObject({
+        status: status === "pass" ? "pass" : "fail",
+        occurrenceId: result.scenarios[0]!.evidenceOccurrenceId,
+      });
+      if (status === "pass") {
+        expect(result.scenarios[0]?.details).toContain(
+          "passed on retry; first attempt: continued failure",
+        );
+      } else {
+        expect(result.scenarios[0]).toMatchObject({
+          status: "fail",
+          details: first.scenarios[0]!.details,
+          evidenceOccurrenceId: first.scenarios[0]!.evidenceOccurrenceId,
+        });
+      }
+      expect(final.occurrences.find((item) => item.id === observations[0]!.id)).toEqual(
+        original.occurrences.find((item) => item.id === observations[0]!.id),
+      );
+    },
+  );
+
   it("captures Gateway facts before cleanup without labelling them as selected harness facts", async () => {
     let identity: { protocol: number; version: string } | null = {
       protocol: 3,

@@ -404,6 +404,26 @@ describe("evidence invocation owner", () => {
     },
   );
 
+  it.each(["blocked", "skipped"] as const)(
+    "rejects an explicit retry of a %s observation",
+    (status) => {
+      const invocation = createQaEvidenceInvocation({
+        scenarios: [scenario],
+        channel: null,
+        launch,
+      });
+      const first = invocation.begin(0, null);
+      invocation.complete(first, {
+        status,
+        entries: [{ ...entry("pass"), result: { status } }],
+      });
+      invocation.select(0, first);
+      const second = invocation.begin(0, first);
+      invocation.complete(second, { status: "pass", entries: [entry("pass")] });
+      expect(() => invocation.select(0, second)).toThrow(/retry selection/);
+    },
+  );
+
   it.each([
     ["source", { ref: "other-source", integrity: "tree-A" }],
     ["runtime", { id: "other-runtime", version: "26.1.0" }],

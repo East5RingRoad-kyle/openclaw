@@ -264,13 +264,16 @@ describe("qa test file scenario runner", () => {
         artifacts: [
           {
             kind: "screenshot",
-            path: path.relative(
-              repoRoot,
-              path.join(
-                path.dirname(result.results[0]!.logPath),
-                "scenario-script/run-1/surfaces/web-ui/screenshot.png",
-              ),
-            ),
+            path: `<repo-root>/${path
+              .relative(
+                repoRoot,
+                path.join(
+                  path.dirname(result.results[0]!.logPath),
+                  "scenario-script/run-1/surfaces/web-ui/screenshot.png",
+                ),
+              )
+              .split(path.sep)
+              .join("/")}`,
             source: "script-producer:web-ui:smoke",
           },
         ],
