@@ -7,6 +7,9 @@ export type ChatMetadataSessionEntry = Partial<
   Pick<
     SessionEntry,
     | "sessionId"
+    | "lifecycleRevision"
+    | "sessionStartedAt"
+    | "acp"
     | "agentHarnessId"
     | "agentRuntimeOverride"
     | "modelSelectionLocked"
@@ -33,5 +36,6 @@ export type ChatMetadataResult = {
   commands?: unknown[];
   models?: ModelChoice[];
   swarmEnabled: boolean;
+  runtimeSelectionLocked?: boolean;
   accountSelection?: ChatAccountSelection;
 };

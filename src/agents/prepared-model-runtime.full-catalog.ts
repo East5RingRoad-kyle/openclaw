@@ -161,6 +161,7 @@ export function mergePreparedNativeCatalog(
       (entry) =>
         JSON.stringify([
           resolveModelCatalogIdentityKey(entry),
+          entry.nativeRuntime ?? "",
           entry.api ?? "",
           normalizeCatalogRouteBaseUrl(entry.baseUrl) ?? "",
         ]),
