@@ -4,6 +4,7 @@ import {
   isFutureDateTimestampMs,
   resolveExpiresAtMsFromDurationMs,
 } from "openclaw/plugin-sdk/number-runtime";
+import { questionGatewayRuntime } from "openclaw/plugin-sdk/question-gateway-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import type { ClawdbotConfig, PluginRuntime, RuntimeEnv } from "../runtime-api.js";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
@@ -423,6 +424,31 @@ export async function handleFeishuCardAction(params: {
           to: resolveCallbackTarget(event),
           text: "Cancelled.",
           accountId,
+        });
+        completeFeishuCardAction(event.token, account.accountId);
+        return;
+      }
+
+      if (envelope.a === "feishu.question.answer") {
+        const questionId =
+          typeof envelope.m?.questionId === "string" ? envelope.m.questionId.trim() : "";
+        const optionValue = envelope.q;
+        if (!questionId || !optionValue) {
+          await sendInvalidInteractionNotice({
+            cfg,
+            event,
+            reason: "malformed",
+            accountId,
+          });
+          completeFeishuCardAction(event.token, account.accountId);
+          return;
+        }
+        await questionGatewayRuntime.resolveOption({
+          cfg,
+          questionId,
+          optionValue,
+          senderId: event.operator.open_id,
+          clientDisplayName: "Feishu question",
         });
         completeFeishuCardAction(event.token, account.accountId);
         return;
