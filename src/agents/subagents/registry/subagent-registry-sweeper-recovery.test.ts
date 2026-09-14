@@ -324,7 +324,6 @@ describe("subagent registry recovery scheduling", () => {
     recoverRow.mockResolvedValue({ status: "handled" });
     await sweeper.runTick();
     expect(recoverRow).toHaveBeenCalledTimes(5);
-    sweeper.reset();
   });
 
   it.each(["ordinary", "collector group", "collector launch"])(
@@ -450,7 +449,6 @@ describe("subagent registry recovery scheduling", () => {
       expect(runs.get(changed.runId)).toBe(changed);
       expect(changed.execution.suppressSessionEffects).toBe(suppressed ? true : undefined);
       expect(runs.get(groupmate.runId)).toBe(groupmate);
-      sweeper.reset();
     },
   );
 
@@ -472,7 +470,6 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(5_000);
 
     expect(finalizeInterruptedSubagentRun).toHaveBeenCalledOnce();
-    sweeper.reset();
   });
 
   it("coalesces duplicate schedules before the owner pass starts", async () => {
@@ -485,7 +482,6 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(1);
 
     expect(recoverRow).toHaveBeenCalledOnce();
-    sweeper.reset();
   });
 
   it("cancels a scheduled registry sweep on stop and preserves the next start cadence", async () => {
@@ -505,7 +501,6 @@ describe("subagent registry recovery scheduling", () => {
     expect(recoverRow).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(recoverRow).toHaveBeenCalledOnce();
-    sweeper.reset();
   });
 
   it.each([false, true])(
@@ -514,7 +509,7 @@ describe("subagent registry recovery scheduling", () => {
       recoverRow.mockResolvedValue({ status: "handled" });
       const { sweeper, warn } = createHarness({});
       if (suspended) {
-        expect(tryBeginGatewaySuspendAdmission()).not.toBeNull();
+        expect(tryBeginGatewaySuspendAdmission(() => {})).not.toBeNull();
       } else {
         markGatewayRestartDraining();
       }
@@ -538,7 +533,6 @@ describe("subagent registry recovery scheduling", () => {
       await vi.waitFor(() => expect(recoverRow).toHaveBeenCalledOnce());
       await vi.advanceTimersByTimeAsync(60_000);
       expect(recoverRow).toHaveBeenCalledTimes(2);
-      sweeper.reset();
     },
   );
 
@@ -556,7 +550,6 @@ describe("subagent registry recovery scheduling", () => {
 
     expect(recoverRow).toHaveBeenCalledTimes(3);
     expect(finalizeInterruptedSubagentRun).not.toHaveBeenCalled();
-    sweeper.reset();
   });
 
   it("never terminalizes deferred accepted-run reconciliation", async () => {
@@ -569,7 +562,6 @@ describe("subagent registry recovery scheduling", () => {
 
     expect(recoverRow.mock.calls.length).toBeGreaterThan(4);
     expect(finalizeInterruptedSubagentRun).not.toHaveBeenCalled();
-    sweeper.reset();
   });
 
   it("does not terminalize a durable kill intent while runtime abort is rejected", async () => {
@@ -606,7 +598,6 @@ describe("subagent registry recovery scheduling", () => {
       }),
       "sweeper-pending-kill-intent",
     );
-    sweeper.reset();
   });
 
   it("terminalizes a legacy unowned kill without touching the current child session", async () => {
@@ -631,7 +622,6 @@ describe("subagent registry recovery scheduling", () => {
       }),
       "sweeper-retired-kill-intent",
     );
-    sweeper.reset();
   });
 
   it.each([
@@ -1002,7 +992,6 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(recoverRow).toHaveBeenCalledTimes(2);
-    sweeper.reset();
   });
 
   it("settles an active registry sweep without reviving its stopped rerun", async () => {
@@ -1019,7 +1008,6 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(recoverRow).toHaveBeenCalledOnce();
-    sweeper.reset();
   });
 
   it("reports an admitted registry sweep failure even when restart drain has started", async () => {
@@ -1035,7 +1023,6 @@ describe("subagent registry recovery scheduling", () => {
     expect(warn).toHaveBeenCalledExactlyOnceWith(
       "subagent run sweep failed: unexpected recovery failure",
     );
-    sweeper.reset();
   });
 
   it("releases the owner lane after an unexpected pass failure", async () => {
@@ -1050,7 +1037,6 @@ describe("subagent registry recovery scheduling", () => {
 
     expect(recoverRow).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledWith("subagent run sweep failed: unexpected recovery failure");
-    sweeper.reset();
   });
 });
 
