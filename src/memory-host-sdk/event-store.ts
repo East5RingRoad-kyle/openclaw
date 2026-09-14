@@ -319,7 +319,7 @@ export async function registerMemoryHostEvent(params: {
       keyEndExclusive: eventKeyRangeEnd(params.workspaceDir),
       valueKind: "event",
     },
-    journalValue: (sequence) => ({ kind: "event", event, recordedAt, sequence }),
+    journalValue: { kind: "event", event, recordedAt },
   };
   // Capture workspace keys and event time together before the lazy store load yields.
   const pluginState = await import("../plugin-state/plugin-state-store.js");
@@ -350,12 +350,12 @@ export async function listStoredMemoryHostEvents(params: {
     ...(params.env ? { env: params.env } : {}),
   };
   const pluginState = await import("../plugin-state/plugin-state-store.js");
-  const entries = pluginState
-    .pluginStateEntriesInKeyRange(query)
-    .flatMap((entry): PersistedMemoryHostEvent[] => {
+  const entries = (await pluginState.pluginStateEntriesInKeyRange(query)).flatMap(
+    (entry): PersistedMemoryHostEvent[] => {
       const value = entry.value as StoredMemoryHostEvent;
       return value.kind === "event" ? [{ ...entry, value }] : [];
-    });
+    },
+  );
   return entries.toReversed();
 }
 
