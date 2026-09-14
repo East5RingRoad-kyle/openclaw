@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
+import { resolveQaEvidenceContainment } from "./evidence-summary-schema.js";
 import {
   buildQaOccurrenceEvidenceSummary,
   validateQaEvidenceSummaryJson,

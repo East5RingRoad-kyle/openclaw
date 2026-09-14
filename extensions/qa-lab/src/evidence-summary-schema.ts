@@ -1,10 +1,12 @@
 // Canonical v2/v3 evidence shapes and occurrence binding validation.
 import { z } from "zod";
 import { qaEvidenceAssertionSchema, qaEvidenceCoverageSchema } from "./evidence-assertion.js";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
-import { qaProfileEvidencePlan } from "./profile-evidence-plan.js";
 import { qaRuntimePairLaneSchema } from "./scenario-catalog.js";
-import { qaScorecardEvidenceModeSchema } from "./scorecard-taxonomy.js";
+import {
+  qaMaturityTaxonomyIdentitySchema,
+  qaProofRequirementsSchema,
+  qaScorecardEvidenceModeSchema,
+} from "./scorecard-taxonomy.js";
 
 export const QA_EVIDENCE_SUMMARY_KIND = "openclaw.qa.evidence-summary";
 export const QA_EVIDENCE_FILENAME = "qa-evidence.json";
@@ -16,6 +18,115 @@ const qaEvidenceStatusSchema = z.enum(["pass", "fail", "blocked", "skipped"]);
 const nonEmptyStringSchema = z.string().trim().min(1);
 const nullableStringSchema = nonEmptyStringSchema.nullable();
 const qaEvidenceProfileIdSchema = nonEmptyStringSchema;
+
+const qaEvidenceCellSchema = z.strictObject({
+  scenarioId: nonEmptyStringSchema,
+  executionKind: z.enum(["flow", "script", "vitest", "playwright"]),
+  channel: nullableStringSchema,
+});
+
+export const QA_PROFILE_EVIDENCE_PLAN_LIST_NAMES = [
+  "membership",
+  "selected",
+  "excluded",
+  "expectedCells",
+  "observedCells",
+  "missingCells",
+] as const;
+type ListName = (typeof QA_PROFILE_EVIDENCE_PLAN_LIST_NAMES)[number];
+const planShape = z.strictObject({
+  profile: nonEmptyStringSchema,
+  membership: z.array(nonEmptyStringSchema),
+  selected: z.array(nonEmptyStringSchema),
+  excluded: z.array(
+    z.strictObject({
+      scenarioId: nonEmptyStringSchema,
+      reasons: z.array(nonEmptyStringSchema).min(1),
+    }),
+  ),
+  expectedCells: z.array(qaEvidenceCellSchema),
+  observedCells: z.array(qaEvidenceCellSchema),
+  missingCells: z.array(qaEvidenceCellSchema),
+  counts: z.record(z.enum(QA_PROFILE_EVIDENCE_PLAN_LIST_NAMES), z.number().int().nonnegative()),
+  // Historical plans retain their original serialized bytes and attestation digest.
+  taxonomyIdentity: qaMaturityTaxonomyIdentitySchema.optional(),
+  proofRequirements: qaProofRequirementsSchema.optional(),
+});
+
+type PlanShape = z.infer<typeof planShape>;
+
+export function qaProfileEvidencePlanCellKey(cell: z.infer<typeof qaEvidenceCellSchema>) {
+  return `${cell.scenarioId}\u0000${cell.executionKind}\u0000${cell.channel ?? ""}`;
+}
+
+function assertCanonical(name: string, values: readonly string[]) {
+  if (values.some((value, index) => index > 0 && values[index - 1]! >= value)) {
+    throw new Error(`${name} must be unique and sorted`);
+  }
+}
+
+function assertSame(message: string, left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length || left.some((value, index) => value !== right[index])) {
+    throw new Error(message);
+  }
+}
+
+function planLists(plan: PlanShape): Record<ListName, string[]> {
+  return {
+    membership: plan.membership,
+    selected: plan.selected,
+    excluded: plan.excluded.map((entry) => entry.scenarioId),
+    expectedCells: plan.expectedCells.map(qaProfileEvidencePlanCellKey),
+    observedCells: plan.observedCells.map(qaProfileEvidencePlanCellKey),
+    missingCells: plan.missingCells.map(qaProfileEvidencePlanCellKey),
+  };
+}
+
+function assertPlanInvariants(plan: PlanShape) {
+  const lists = planLists(plan);
+  for (const name of QA_PROFILE_EVIDENCE_PLAN_LIST_NAMES) {
+    assertCanonical(name, lists[name]);
+    if (plan.counts[name] !== lists[name].length) {
+      throw new Error(`counts.${name} must equal ${lists[name].length}`);
+    }
+  }
+  for (const exclusion of plan.excluded) {
+    assertCanonical(`exclusion reasons for ${exclusion.scenarioId}`, exclusion.reasons);
+  }
+  assertSame(
+    "selected and excluded scenarios must exactly partition membership",
+    lists.membership,
+    [...lists.selected, ...lists.excluded].toSorted(),
+  );
+  assertSame(
+    "expected cells must exactly cover selected scenarios",
+    lists.selected,
+    [...new Set(plan.expectedCells.map((cell) => cell.scenarioId))].toSorted(),
+  );
+  const expected = new Set(lists.expectedCells);
+  const observed = new Set(lists.observedCells);
+  if (lists.observedCells.some((cell) => !expected.has(cell))) {
+    throw new Error("unexpected execution cells invalidate evidence");
+  }
+  assertSame(
+    "missing cells must equal expected minus observed",
+    lists.missingCells,
+    lists.expectedCells.filter((cell) => !observed.has(cell)),
+  );
+}
+
+export const qaProfileEvidencePlanSchema = planShape.superRefine((plan, context) => {
+  try {
+    assertPlanInvariants(plan);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+export type QaProfileEvidencePlan = z.infer<typeof qaProfileEvidencePlanSchema>;
 
 const qaEvidenceProviderSchema = z.strictObject({
   id: nonEmptyStringSchema,
@@ -162,14 +273,8 @@ const qaEvidenceSummarySchema = z.strictObject({
   evidenceMode: qaScorecardEvidenceModeSchema,
   entries: z.array(qaEvidenceSummaryEntrySchema),
   profile: qaEvidenceProfileIdSchema.optional(),
-  profilePlan: qaProfileEvidencePlan.schema.optional(),
+  profilePlan: qaProfileEvidencePlanSchema.optional(),
   scorecard: qaEvidenceScorecardSchema.optional(),
-});
-
-const qaEvidenceCellSchema = z.strictObject({
-  scenarioId: nonEmptyStringSchema,
-  executionKind: z.enum(["flow", "script", "vitest", "playwright"]),
-  channel: nullableStringSchema,
 });
 
 const qaEvidenceIdentitySchema = z.strictObject({
@@ -248,6 +353,110 @@ const qaEvidenceSummaryV3Shape = qaEvidenceSummarySchema.extend({
   entries: z.array(qaEvidenceSummaryV3EntrySchema),
   occurrences: z.array(qaEvidenceOccurrenceSchema),
 });
+
+/** Direct bundle membership preserves child-local selection across outer retries. */
+export function resolveQaEvidenceContainment(
+  occurrences: readonly QaEvidenceOccurrence[],
+  entries: readonly QaEvidenceSummaryV3Entry[],
+) {
+  const byId = new Map(occurrences.map((occurrence) => [occurrence.id, occurrence]));
+  const parentById = new Map<string, string>();
+  const localActivity = new Map(
+    entries.map((entry) => [entry.binding.occurrenceId, entry.effective]),
+  );
+  for (const owner of occurrences) {
+    if (owner.childCoverage !== undefined && !owner.childOccurrenceIds) {
+      throw new Error("child coverage requires captured bundle membership");
+    }
+    if (!owner.childOccurrenceIds) {
+      continue;
+    }
+    const bundleReceipts = owner.receipts.filter(
+      (receipt) => receipt.artifact.kind === "producer-evidence",
+    );
+    if (
+      owner.scenario?.kind !== "observation" ||
+      owner.terminalStatus === null ||
+      bundleReceipts.length !== 1 ||
+      bundleReceipts[0]!.phase !== "prepared"
+    ) {
+      throw new Error("child evidence requires a completed command and captured bundle receipt");
+    }
+    for (const id of owner.childOccurrenceIds) {
+      if (id === owner.id || !byId.has(id) || parentById.has(id)) {
+        throw new Error("child evidence membership is missing, repeated, or conflicting");
+      }
+      parentById.set(id, owner.id);
+    }
+  }
+  for (const occurrence of occurrences) {
+    const references = [
+      occurrence.retryOf,
+      occurrence.scenario?.kind === "observation"
+        ? occurrence.scenario.instanceOccurrenceId
+        : occurrence.scenario?.resultOccurrenceId,
+    ];
+    if (references.some((id) => id && parentById.get(id) !== parentById.get(occurrence.id))) {
+      throw new Error("child evidence membership must contain complete local ownership");
+    }
+    const visited = new Set([occurrence.id]);
+    let parent = parentById.get(occurrence.id);
+    while (parent) {
+      if (visited.has(parent)) {
+        throw new Error("cyclic child evidence membership");
+      }
+      visited.add(parent);
+      parent = parentById.get(parent);
+    }
+  }
+  function rootId(id: string) {
+    let root = id;
+    let parent = parentById.get(root);
+    while (parent) {
+      root = parent;
+      parent = parentById.get(root);
+    }
+    return root;
+  }
+  function isActive(id: string) {
+    let parent = parentById.get(id);
+    while (parent) {
+      // Bundle owners always publish a command row. Missing rows cannot make
+      // retained child detail count as a successful enclosing attempt.
+      if (localActivity.get(parent) !== true) {
+        return false;
+      }
+      parent = parentById.get(parent);
+    }
+    return true;
+  }
+  function projectCoverage(id: string, claims: QaEvidenceSummaryV3Entry["coverage"]) {
+    let coverage = claims;
+    let parent = parentById.get(id);
+    while (parent) {
+      const cap = byId.get(parent)!.childCoverage;
+      if (cap !== undefined) {
+        const allowed = new Set(cap.map((claim) => claim.id));
+        const primary = new Set(
+          cap.filter((claim) => claim.role === "primary").map((claim) => claim.id),
+        );
+        coverage = coverage
+          .filter((claim) => allowed.has(claim.id))
+          .map((claim) =>
+            claim.role === "primary" && !primary.has(claim.id)
+              ? { id: claim.id, role: "secondary" }
+              : claim,
+          );
+      }
+      parent = parentById.get(parent);
+    }
+    return coverage;
+  }
+  const rootInstances = occurrences.filter(
+    (occurrence) => occurrence.scenario?.kind === "instance" && !parentById.has(occurrence.id),
+  );
+  return { parentById, rootId, isActive, projectCoverage, rootInstances };
+}
 
 function validateOccurrenceBindings(summary: z.infer<typeof qaEvidenceSummaryV3Shape>) {
   const occurrences = new Map<string, QaEvidenceOccurrence>();

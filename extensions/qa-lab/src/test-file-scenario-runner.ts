@@ -5,9 +5,9 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { resolvePositiveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { assertQaSuiteArtifactWritten } from "./artifact-assertion.js";
 import { resolveQaArtifactPath, toRepoArtifactPath } from "./cli-paths.js";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { captureQaEvidenceLaunchIdentity } from "./evidence-environment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
+import { resolveQaEvidenceContainment } from "./evidence-summary-schema.js";
 import {
   QA_EVIDENCE_FILENAME,
   buildQaOccurrenceEvidenceSummary,
@@ -21,7 +21,11 @@ import {
 } from "./evidence-summary.js";
 import { sanitizeQaProgressValue } from "./progress-format.js";
 import type { QaProviderMode } from "./providers/index.js";
-import type { QaSeedScenarioWithSource } from "./scenario-catalog.js";
+import type {
+  QaSeedScenarioWithSource,
+  QaTestFileExecutionKind,
+  QaTestFileScenario,
+} from "./scenario-catalog.js";
 import type { QaScorecardEvidenceMode } from "./scorecard-taxonomy.js";
 import { shellQuote } from "./shell-quote.js";
 import {
@@ -48,15 +52,6 @@ import {
 } from "./test-file-scenario-script-evidence.js";
 import { readNativeVitestExecutionFailure } from "./test-file-scenario-vitest-report.js";
 export type { QaScenarioCommandExecution } from "./test-file-scenario-command-lifecycle.js";
-
-export type QaTestFileScenario = QaSeedScenarioWithSource & {
-  execution: Extract<
-    QaSeedScenarioWithSource["execution"],
-    { kind: "script" | "vitest" | "playwright" }
-  >;
-};
-
-export type QaTestFileExecutionKind = "script" | "vitest" | "playwright";
 
 type QaTestFileScenarioRunParams = {
   commandTimeoutMs?: number;

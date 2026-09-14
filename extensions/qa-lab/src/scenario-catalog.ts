@@ -379,6 +379,15 @@ export type QaSeedScenarioWithSource = QaSeedScenario & {
   };
 };
 
+export type QaTestFileScenario = QaSeedScenarioWithSource & {
+  execution: Extract<
+    QaSeedScenarioWithSource["execution"],
+    { kind: "script" | "vitest" | "playwright" }
+  >;
+};
+
+export type QaTestFileExecutionKind = "script" | "vitest" | "playwright";
+
 export type QaScenarioPack = z.infer<typeof qaScenarioPackSchema> & {
   scenarios: QaSeedScenarioWithSource[];
 };

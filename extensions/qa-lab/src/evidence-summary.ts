@@ -1,6 +1,5 @@
 // QA Lab plugin module implements QA evidence summary behavior.
 import { normalizeSortedUniqueTrimmedStringList } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { resolveQaEvidenceEnvironment } from "./evidence-environment.js";
 import {
   QA_EVIDENCE_SUMMARY_KIND,
@@ -9,6 +8,8 @@ import {
   qaEvidenceSummarySchema,
   qaEvidenceSummaryV3Schema,
   qaVersionedEvidenceSummarySchema,
+  resolveQaEvidenceContainment,
+  type QaProfileEvidencePlan,
   type QaEvidenceStatus,
   type QaEvidenceTiming,
   type QaEvidenceRttMeasurement,
@@ -24,7 +25,6 @@ import {
   type QaEvidenceSummaryV2Entry,
 } from "./evidence-summary-schema.js";
 import { splitQaModelRef } from "./model-selection.js";
-import type { QaProfileEvidencePlan } from "./profile-evidence-plan.js";
 import { getQaProvider, type QaProviderMode } from "./providers/index.js";
 import type { QaRuntimePairLane } from "./scenario-catalog.js";
 import {

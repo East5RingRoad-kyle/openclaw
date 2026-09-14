@@ -63,11 +63,12 @@ describe("producer coverage claims", () => {
       const childId = child.begin(0);
       child.complete(childId, {
         status: "pass",
-        entries: buildScriptProducerEvidence({ status: "pass", coverage }).entries.map((entry) => ({
-          ...entry,
-          binding: { occurrenceId: childId, assertionId: "check", receiptId: "child-receipt" },
-          effective: true,
-        })),
+        entries: buildScriptProducerEvidence({ status: "pass", coverage }).entries.map((entry) =>
+          Object.assign({}, entry, {
+            binding: { occurrenceId: childId, assertionId: "check", receiptId: "child-receipt" },
+            effective: true,
+          }),
+        ),
         receipts: [
           {
             id: "child-receipt",
@@ -138,10 +139,9 @@ describe("producer coverage claims", () => {
         const proof = qaProfileEvidencePlan.evaluateProof(
           {
             ...profilePlan,
-            proofRequirements: profilePlan.proofRequirements!.map((item) => ({
-              ...item,
-              retryAcceptance,
-            })),
+            proofRequirements: profilePlan.proofRequirements!.map((item) =>
+              Object.assign({}, item, { retryAcceptance }),
+            ),
           },
           summary,
         );

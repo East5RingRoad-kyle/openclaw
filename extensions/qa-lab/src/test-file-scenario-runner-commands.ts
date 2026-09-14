@@ -4,7 +4,7 @@ import {
   buildScriptEvidenceSummary,
   buildVitestEvidenceSummary,
 } from "./evidence-summary.js";
-import type { QaTestFileExecutionKind, QaTestFileScenario } from "./test-file-scenario-runner.js";
+import type { QaTestFileExecutionKind, QaTestFileScenario } from "./scenario-catalog.js";
 import { resolveNativeVitestReportPath } from "./test-file-scenario-vitest-report.js";
 
 export type QaScenarioCommandStep = {

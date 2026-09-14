@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveQaArtifactPath } from "./cli-paths.js";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
+import { resolveQaEvidenceContainment } from "./evidence-summary-schema.js";
 import {
   getEffectiveQaEvidenceEntries,
   projectQaEvidenceScenarioOutcomes,

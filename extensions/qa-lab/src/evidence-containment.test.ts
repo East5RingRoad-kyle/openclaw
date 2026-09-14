@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
+import { resolveQaEvidenceContainment } from "./evidence-summary-schema.js";
 import {
   getEffectiveQaEvidenceEntries,
   projectQaEvidenceScenarioOutcomes,

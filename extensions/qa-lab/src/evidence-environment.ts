@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import type { QaEvidenceIdentity } from "./evidence-summary.js";
+import type { QaEvidenceIdentity } from "./evidence-summary-schema.js";
 
 // A wedged git (NFS hang, credential helper prompt) must not block evidence
 // metadata resolution; the caller already falls back to GITHUB_SHA/null.

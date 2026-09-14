@@ -15,15 +15,13 @@ import {
 import type { QaLabServerHandle } from "./lab-server.types.js";
 import type { QaTransportAdapter } from "./qa-transport.js";
 import * as scenarioCatalog from "./scenario-catalog.js";
+import type { QaTestFileScenario } from "./scenario-catalog.js";
 import { writeQaSuiteArtifacts } from "./suite-artifacts.js";
 import { createQaSuiteEvidenceInvocation } from "./suite-evidence.js";
 import { makeQaSuiteTestScenario } from "./suite-test-helpers.js";
 import type { QaSuiteRunParams, QaSuiteScenarioResult } from "./suite.js";
 import { throwQaSuiteCleanupErrors } from "./suite.js";
-import type {
-  QaTestFileScenario,
-  QaTestFileScenarioRunResult,
-} from "./test-file-scenario-runner.js";
+import type { QaTestFileScenarioRunResult } from "./test-file-scenario-runner.js";
 import {
   makeTestFileScenario,
   resolveScriptAttemptOutputDir,

@@ -6,9 +6,9 @@ import { formatErrorMessage, toErrorObject } from "openclaw/plugin-sdk/error-run
 import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk/run-command";
 import { toRepoRelativePath } from "./cli-paths.js";
 import { QaSuiteArtifactError, QaSuiteInfraError } from "./errors.js";
-import { resolveQaEvidenceContainment } from "./evidence-containment.js";
 import { captureQaEvidenceLaunchIdentity } from "./evidence-environment.js";
 import { createQaEvidenceInvocation } from "./evidence-invocation.js";
+import { resolveQaEvidenceContainment } from "./evidence-summary-schema.js";
 import {
   QA_EVIDENCE_FILENAME,
   buildQaSuiteEvidenceSummary,
@@ -34,6 +34,8 @@ import {
   readQaBootstrapScenarioCatalog,
   resolveQaScenarioRequiredProviderMode,
   type QaSeedScenarioWithSource,
+  type QaTestFileExecutionKind,
+  type QaTestFileScenario,
 } from "./scenario-catalog.js";
 import { expandQaScenarioExecutionCells, type QaScenarioExecutionCell } from "./scenario-lane.js";
 import {
@@ -64,8 +66,6 @@ import * as dockerBatch from "./test-file-scenario-docker-batch.js";
 import {
   isQaTestFileScenario,
   runQaTestFileScenarios,
-  type QaTestFileExecutionKind,
-  type QaTestFileScenario,
   type QaTestFileScenarioRunResult,
 } from "./test-file-scenario-runner.js";
 
