@@ -7,11 +7,19 @@ import {
   resolveCronJobsStorePath,
   saveCronJobsStore,
 } from "../../../cron/store.js";
+import { resolveDoctorContributionHealthChecks } from "../../../flows/doctor-health-contributions.js";
+import {
+  createDoctorHealthFlowContext,
+  resolveDoctorHealthContributions,
+  runDoctorHealthContributionList,
+} from "../../../flows/doctor-health-contributions.test-support.js";
+import { runDoctorLintChecks } from "../../../flows/doctor-lint-flow.js";
+import * as processExec from "../../../process/exec.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../../../test-utils/openclaw-test-state.js";
-import { collectLegacyCronStoreHealthFindings, maybeRepairLegacyCronStore } from "./index.js";
+import { createDoctorPrompter } from "../../doctor-prompter.js";
 
 const { note } = vi.hoisted(() => ({ note: vi.fn() }));
 vi.mock("../../../../packages/terminal-core/src/note.js", () => ({ note }));
@@ -26,6 +34,7 @@ const projectNativeToolAuthority = vi.fn(() => ["read", "exec"]);
 
 beforeEach(async () => {
   state = await createOpenClawTestState({ label: "doctor-native-cap" });
+  vi.spyOn(processExec, "runExec").mockResolvedValue({ stdout: "", stderr: "" });
   vi.spyOn(cliBackends, "resolveCliBackendConfig").mockImplementation((provider) => ({
     id: provider,
     config: { command: "fixture-cli" },
@@ -41,9 +50,23 @@ afterEach(async () => {
   await state.cleanup();
 });
 
+async function runRegisteredCronCheck(config: OpenClawConfig) {
+  const context = createDoctorHealthFlowContext({ cfg: config, configPath: state.configPath });
+  const result = await runDoctorLintChecks(
+    { mode: "lint", runtime: context.runtime, cfg: config, configPath: state.configPath },
+    {
+      checks: await resolveDoctorContributionHealthChecks(),
+      onlyIds: ["core/doctor/legacy-cron-store"],
+      includeAllChecks: true,
+    },
+  );
+  expect(result.checksRun).toBe(1);
+  return result.findings;
+}
+
 describe("Doctor cron native-tool advisory", () => {
   it.each([false, true])(
-    "reports possible incomplete default captures without rewriting tools (repair=%s)",
+    "doctor:legacy-cron dispatch reports incomplete defaults without rewriting tools (repair=%s)",
     async (repair) => {
       const jobs = [
         { id: "old-default", toolsAllow: ["message"], toolsAllowIsDefault: true },
@@ -71,11 +94,20 @@ describe("Doctor cron native-tool advisory", () => {
       await saveCronJobsStore(storePath, { version: 1, jobs });
       const before = (await loadCronJobsStoreWithConfigJobsReadOnly(storePath)).store.jobs;
 
-      await maybeRepairLegacyCronStore({
+      const context = createDoctorHealthFlowContext({
         cfg,
-        options: { repair },
-        prompter: { confirm: vi.fn().mockResolvedValue(repair) },
+        configPath: state.configPath,
+        options: { repair, nonInteractive: true },
       });
+      context.prompter = createDoctorPrompter({
+        runtime: context.runtime,
+        options: context.options,
+      });
+      const contributions = resolveDoctorHealthContributions().filter(
+        (contribution) => contribution.id === "doctor:legacy-cron",
+      );
+      expect(contributions).toHaveLength(1);
+      await runDoctorHealthContributionList(context, contributions);
       const advisories = note.mock.calls
         .map(([message]) => String(message))
         .filter((message) => message.includes("no native file, command, or web tools"));
@@ -89,18 +121,20 @@ describe("Doctor cron native-tool advisory", () => {
       const after = (await loadCronJobsStoreWithConfigJobsReadOnly(storePath)).store.jobs;
       expect(after.map((job) => job.payload)).toEqual(before.map((job) => job.payload));
 
-      const findings = await collectLegacyCronStoreHealthFindings({ cfg });
+      const findings = await runRegisteredCronCheck(cfg);
       const nativeFindings = findings.filter(
         (finding) => finding.requirement === "cron-native-tool-cap-review",
       );
-      expect(nativeFindings.map((finding) => finding.message)).toEqual(advisories);
+      expect(nativeFindings.map((finding) => finding.message).toSorted()).toEqual(
+        advisories.toSorted(),
+      );
       expect(nativeFindings.every((finding) => finding.fixHint?.includes("will not add"))).toBe(
         true,
       );
     },
   );
 
-  it("uses the owning agent's model alias when Doctor reads a stored job", async () => {
+  it("core/doctor/legacy-cron-store dispatch uses the owning agent's model alias", async () => {
     const storePath = resolveCronJobsStorePath();
     await saveCronJobsStore(storePath, {
       version: 1,
@@ -117,15 +151,13 @@ describe("Doctor cron native-tool advisory", () => {
         }),
       ],
     });
-    const findings = await collectLegacyCronStoreHealthFindings({
-      cfg: {
-        agents: {
-          entries: {
-            main: { model: "other-cli/example" },
-            research: {
-              model: "other-cli/example",
-              models: { "native-cli/example": { alias: "reviewer" } },
-            },
+    const findings = await runRegisteredCronCheck({
+      agents: {
+        entries: {
+          main: { model: "other-cli/example" },
+          research: {
+            model: "other-cli/example",
+            models: { "native-cli/example": { alias: "reviewer" } },
           },
         },
       },
