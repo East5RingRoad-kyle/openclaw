@@ -311,7 +311,7 @@ export async function runQaFlowSuiteStandard(
         scenarioResult = recorded.selected;
       }
       if (scenarioResult.status === "pass" && params?.roundTripProbe?.scenarioId === scenario.id) {
-        const probeOccurrenceId = recording.invocation.begin(index, null);
+        const probeOccurrenceId = recording.invocation.begin(index, null, { diagnostic: true });
         let probeResult: Awaited<ReturnType<typeof runQaSuiteRoundTripProbe>>;
         try {
           probeResult = await runQaSuiteRoundTripProbe({

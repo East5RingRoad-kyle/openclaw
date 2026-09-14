@@ -1214,6 +1214,14 @@ describe("qa suite runtime launcher", () => {
     "retains captured child observations through aggregate %s",
     async (failure) => {
       const repoRoot = await makeTempRepo("qa-suite-recorded-partition-");
+      const catalog = structuredClone(scenarioCatalog.readQaBootstrapScenarioCatalog());
+      for (const scenario of catalog.scenarios) {
+        scenario.assertions = [
+          { id: "child-result", meaning: "the child owns its result", coverage: [] },
+        ];
+      }
+      vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue(catalog);
+      const childIds = new Set<string>();
       const defaultFlow = requireDefaultQaFlowSuiteImplementation();
       const anchors: string[] = [];
       let attempts = 0;
@@ -1228,12 +1236,13 @@ describe("qa suite runtime launcher", () => {
         const recording = await createQaSuiteEvidenceInvocation(params, {
           repoRoot,
           outputDir: params.outputDir!,
-          selectedScenarios: [makeQaSuiteTestScenario(id)],
+          selectedScenarios: [catalog.scenarios.find((scenario) => scenario.id === id)!],
           providerMode: "mock-openai",
           primaryModel: "mock-openai/test",
           transportId: "qa-channel",
         });
         const observation = recording.invocation.begin(0);
+        childIds.add(observation);
         const result = await recording.record(0, observation, {
           name: id,
           status: target && failure === "retry-failure" && attempts === 1 ? "fail" : "pass",
@@ -1261,6 +1270,13 @@ describe("qa suite runtime launcher", () => {
       expect(evidence.schemaVersion).toBe(3);
       if (evidence.schemaVersion !== 3) {
         throw new Error("expected recorded aggregate");
+      }
+      for (const occurrence of evidence.occurrences) {
+        expect(occurrence.assertions).toEqual(
+          childIds.has(occurrence.id)
+            ? [{ id: "child-result", meaning: "the child owns its result", coverage: [] }]
+            : null,
+        );
       }
       expect(new Set(anchors).size).toBe(1);
       expect(anchors).toHaveLength(failure === "after-pass" ? 1 : 2);
@@ -2436,6 +2452,13 @@ describe("qa suite runtime launcher", () => {
   });
 
   it("fails and stops when a started flow partition omits its scenario result", async () => {
+    const catalog = structuredClone(scenarioCatalog.readQaBootstrapScenarioCatalog());
+    for (const scenario of catalog.scenarios) {
+      scenario.assertions = [
+        { id: "scenario-result", meaning: "the scenario owns its result", coverage: [] },
+      ];
+    }
+    vi.spyOn(scenarioCatalog, "readQaBootstrapScenarioCatalog").mockReturnValue(catalog);
     const defaultFlowImplementation = requireDefaultQaFlowSuiteImplementation();
     runQaFlowSuite.mockImplementationOnce(async (params) => ({
       ...(await defaultFlowImplementation(params)),
@@ -2482,6 +2505,11 @@ describe("qa suite runtime launcher", () => {
         },
       },
     ]);
+    const canonical = validateQaEvidenceSummaryJson(evidence);
+    if (canonical.schemaVersion !== 3) {
+      throw new Error("expected recorded aggregate");
+    }
+    expect(canonical.occurrences.every((item) => item.assertions === null)).toBe(true);
   });
 
   it("fails and stops when a started native partition omits its scenario result", async () => {

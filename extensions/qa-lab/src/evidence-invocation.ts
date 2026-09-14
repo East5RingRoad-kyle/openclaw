@@ -135,7 +135,11 @@ export function createQaEvidenceInvocation(params: {
     }
   }
 
-  function begin(index: number, retryOf: string | null = previousFailure(index)) {
+  function begin(
+    index: number,
+    retryOf: string | null = previousFailure(index),
+    options: { diagnostic?: boolean } = {},
+  ) {
     const anchor = anchorFor(index);
     const occurrence: QaEvidenceOccurrence = {
       id: randomUUID(),
@@ -143,7 +147,9 @@ export function createQaEvidenceInvocation(params: {
       scenario: { kind: "observation", instanceOccurrenceId: anchor.id },
       retryOf,
       terminalStatus: null,
-      assertions: structuredClone(declarations[index] ?? null),
+      // Control observations own their diagnostics, not the child's scenario
+      // assertions. Actual attempts retain declarations even when no rows return.
+      assertions: options.diagnostic ? null : structuredClone(declarations[index] ?? null),
       launch: structuredClone(launch),
       receipts: [],
     };

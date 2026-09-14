@@ -25,6 +25,9 @@ describe("isolated QA suite transport cleanup", () => {
   it("retains the original pre-result error after the child's initial snapshot", async () => {
     const lab = createCleanupTestLab();
     const context = createCleanupTestContext();
+    context.selectedScenarios[0]!.assertions = [
+      { id: "child-result", meaning: "the child owns its result", coverage: [] },
+    ];
     const original = new Error("child failed before its first result");
     const snapshots: QaEvidenceSummaryV3Json[] = [];
     const result = await runQaFlowSuiteIsolated(
@@ -49,6 +52,7 @@ describe("isolated QA suite transport cleanup", () => {
       status: "fail",
       occurrenceId: result.scenarios[0]!.evidenceOccurrenceId,
     });
+    expect(snapshots.at(-1)!.occurrences.every((item) => item.assertions === null)).toBe(true);
   });
 
   it.each(["missing result", "cleanup failure"] as const)(
@@ -56,6 +60,9 @@ describe("isolated QA suite transport cleanup", () => {
     async (failure) => {
       const lab = createCleanupTestLab();
       const context = createCleanupTestContext();
+      context.selectedScenarios[0]!.assertions = [
+        { id: "child-result", meaning: "the child owns its result", coverage: [] },
+      ];
       const snapshots: QaEvidenceSummaryV3Json[] = [];
       const runChild = vi.fn<QaSuiteRunner>().mockImplementation(async (params) => {
         const child = await createQaSuiteEvidenceInvocation(params, {
@@ -88,6 +95,12 @@ describe("isolated QA suite transport cleanup", () => {
       const final = snapshots.at(-1)!;
       expect(final.entries.map((entry) => entry.result.status)).toEqual(["pass", "fail"]);
       expect(final.entries[1]?.coverage).toEqual([]);
+      const childId = final.entries[0]!.binding.occurrenceId;
+      for (const occurrence of final.occurrences) {
+        expect(occurrence.assertions).toEqual(
+          occurrence.id === childId ? context.selectedScenarios[0]!.assertions : null,
+        );
+      }
       expect(projectQaEvidenceScenarioOutcomes(final)[0]).toMatchObject({
         status: "fail",
         occurrenceId: result.scenarios[0]!.evidenceOccurrenceId,
@@ -143,6 +156,11 @@ describe("isolated QA suite transport cleanup", () => {
     "preserves the %s progress publication exception boundary",
     async (status) => {
       const lab = createCleanupTestLab();
+      const context = createCleanupTestContext();
+      context.selectedScenarios[0]!.assertions = [
+        { id: "child-result", meaning: "the child owns its result", coverage: [] },
+      ];
+      const snapshots: QaEvidenceSummaryV3Json[] = [];
       const publicationError = new Error("progress publication rejected");
       vi.mocked(lab.setScenarioRun).mockImplementation((next) => {
         if (next?.scenarios[0]?.status === status) {
@@ -163,14 +181,15 @@ describe("isolated QA suite transport cleanup", () => {
         runChild.mockRejectedValueOnce(new Error("worker failed"));
       }
       const run = runQaFlowSuiteIsolated(
-        { lab, startLab: async () => lab },
-        createCleanupTestContext(),
+        { lab, startLab: async () => lab, onEvidence: (summary) => snapshots.push(summary) },
+        context,
         runChild,
       );
       if (status === "pass") {
         await expect(run).resolves.toMatchObject({
           scenarios: [{ status: "fail", details: publicationError.message }],
         });
+        expect(snapshots.at(-1)!.occurrences.every((item) => item.assertions === null)).toBe(true);
       } else {
         await expect(run).rejects.toBe(publicationError);
         expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();

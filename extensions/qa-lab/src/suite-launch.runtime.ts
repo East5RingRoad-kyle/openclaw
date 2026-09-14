@@ -238,7 +238,7 @@ function createQaPartitionEvidenceOwner(params: {
       const selected = invocation.anchors[index]!.scenario;
       const childSelected = selected?.kind === "instance" ? selected.resultOccurrenceId : null;
       const previous = parentFailures.get(index) ?? null;
-      const id = invocation.begin(index, previous);
+      const id = invocation.begin(index, previous, { diagnostic: true });
       invocation.complete(id, {
         status,
         entries: [{ ...diagnostics[index]!, coverage: [] }],
@@ -324,7 +324,7 @@ function createQaPartitionEvidenceOwner(params: {
         continue;
       }
       if (evidence.schemaVersion === 2 || !result) {
-        const id = invocation.begin(index);
+        const id = invocation.begin(index, undefined, { diagnostic: !result });
         const status =
           result?.result.status === "skip" ? "skipped" : (result?.result.status ?? "fail");
         // Repeated labels cannot identify which scheduled instance owns a v2 row.
@@ -374,7 +374,7 @@ function createQaPartitionEvidenceOwner(params: {
         // This successful dispatch settles only its own infrastructure failure.
         // Child observations and the child's selected result remain independent.
         const selectedResult = normalized.at(-1)!.result.evidenceOccurrenceId!;
-        const id = invocation.begin(index, previous);
+        const id = invocation.begin(index, previous, { diagnostic: true });
         invocation.complete(id, { status: "pass", entries: [] });
         invocation.select(index, id);
         invocation.select(index, selectedResult);

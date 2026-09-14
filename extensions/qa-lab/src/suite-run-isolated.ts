@@ -169,7 +169,7 @@ export async function runQaFlowSuiteIsolated(
         const anchor = recording.invocation.anchors[index]!;
         const scenarioOutputDir = path.join(outputDir, "scenarios", anchor.id);
         // Dispatch exists before child launch, including failures before its first result.
-        const dispatchId = recording.invocation.begin(index, null);
+        const dispatchId = recording.invocation.begin(index, null, { diagnostic: true });
         let dispatchCompleted = false;
         let recordingStarted = false;
         let childEvidence: QaEvidenceSummaryV3Json | undefined;
@@ -278,7 +278,9 @@ export async function runQaFlowSuiteIsolated(
           } satisfies QaSuiteScenarioResult;
           const scenarioResult = await recording.record(
             index,
-            dispatchCompleted ? recording.invocation.begin(index, null) : dispatchId,
+            dispatchCompleted
+              ? recording.invocation.begin(index, null, { diagnostic: true })
+              : dispatchId,
             failure,
             { diagnostic: true },
           );

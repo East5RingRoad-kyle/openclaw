@@ -37,6 +37,13 @@ describe("isolated QA suite nested publication", () => {
         throw new Error("expected flow scenario");
       }
       scenario.execution.retryCount = 0;
+      scenario.assertions = [
+        {
+          id: "child-result",
+          meaning: "the child owns this scenario assertion",
+          coverage: [{ id: "qa.coverage", role: "primary" }],
+        },
+      ];
       mocks.writeQaSuiteArtifacts.mockImplementation(async (params) => ({
         evidence: params.recordedEvidence,
         evidencePath: path.join(params.outputDir, "qa-evidence.json"),
@@ -75,6 +82,12 @@ describe("isolated QA suite nested publication", () => {
       );
       expect(observations).toHaveLength(2);
       expect(observations.every((item) => item.terminalStatus === "fail")).toBe(true);
+      for (const observation of observations) {
+        const isChild = first.evidence.entries.some(
+          (entry) => entry.binding.occurrenceId === observation.id,
+        );
+        expect(observation.assertions).toEqual(isChild ? scenario.assertions : null);
+      }
       const artifacts = await Promise.all(
         observations.flatMap((item) =>
           item.receipts.map(async ({ artifact }) => ({

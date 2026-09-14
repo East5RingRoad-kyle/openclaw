@@ -237,11 +237,18 @@ describe("runtime parity Control UI ownership", () => {
   });
 
   it("retains both real child observations and selects one zero-claim comparison", async () => {
+    const scenario = makeQaSuiteTestScenario("runtime-channel", { surface: "channel" });
+    scenario.assertions = [
+      { id: "child-result", meaning: "the child owns its result", coverage: [] },
+    ];
+    mocks.readQaBootstrapScenarioCatalog.mockReturnValue({ scenarios: [scenario] });
+    const childIds = new Set<string>();
     const original = mocks.runQaFlowSuiteStandard.getMockImplementation()!;
     mocks.runQaFlowSuiteStandard.mockImplementation(async (params, context) => {
       const result = await original(params, context);
       const recording = await createQaSuiteEvidenceInvocation(params, context);
       const id = recording.invocation.begin(0);
+      childIds.add(id);
       result.scenarios[0] = await recording.record(0, id, result.scenarios[0]!);
       result.evidence = recording.snapshot();
       return result;
@@ -271,6 +278,9 @@ describe("runtime parity Control UI ownership", () => {
     const childPaths = mocks.runQaFlowSuiteStandard.mock.calls.map(([params]) => params.outputDir);
     expect(new Set(childPaths).size).toBe(2);
     for (const occurrence of evidence.occurrences) {
+      expect(occurrence.assertions).toEqual(
+        childIds.has(occurrence.id) ? scenario.assertions : null,
+      );
       for (const receipt of occurrence.receipts) {
         expect(receipt.phase).toBe("prepared");
         expect(receipt.identity.package).toBeNull();
@@ -284,6 +294,12 @@ describe("runtime parity Control UI ownership", () => {
   });
 
   it("retains a completed child before a later child throws and records the parent failure", async () => {
+    const scenario = makeQaSuiteTestScenario("runtime-channel", { surface: "channel" });
+    scenario.assertions = [
+      { id: "child-result", meaning: "the child owns its result", coverage: [] },
+    ];
+    mocks.readQaBootstrapScenarioCatalog.mockReturnValue({ scenarios: [scenario] });
+    let childId: string | undefined;
     const original = mocks.runQaFlowSuiteStandard.getMockImplementation()!;
     const failure = new Error("runtime cell failed before its result");
     let calls = 0;
@@ -293,11 +309,8 @@ describe("runtime parity Control UI ownership", () => {
         throw failure;
       }
       const result = await original(params, context);
-      result.scenarios[0] = await recording.record(
-        0,
-        recording.invocation.begin(0),
-        result.scenarios[0]!,
-      );
+      childId = recording.invocation.begin(0);
+      result.scenarios[0] = await recording.record(0, childId, result.scenarios[0]!);
       result.evidence = recording.snapshot();
       return result;
     });
@@ -319,6 +332,9 @@ describe("runtime parity Control UI ownership", () => {
     ).rejects.toBe(failure);
     expect(evidence?.entries.map((entry) => entry.result.status)).toEqual(["pass", "fail"]);
     expect(evidence?.entries.at(-1)?.coverage).toEqual([]);
+    for (const occurrence of evidence!.occurrences) {
+      expect(occurrence.assertions).toEqual(occurrence.id === childId ? scenario.assertions : null);
+    }
     expect(projectQaEvidenceScenarioOutcomes(evidence!)).toEqual([
       expect.objectContaining({ scenarioId: "runtime-channel", status: "fail" }),
     ]);

@@ -12,6 +12,7 @@ import {
   QA_EVIDENCE_FILENAME,
   buildQaOccurrenceEvidenceSummary,
   getEffectiveQaEvidenceEntries,
+  projectQaEvidenceScenarioOutcomes,
   type QaEvidenceOccurrence,
   type QaEvidenceStatus,
   type QaEvidenceSummaryJson,
@@ -291,6 +292,10 @@ async function runQaTestFileScenario(params: {
     ...statusFromProducerEntries({
       allowBlockedEvidence: params.scenario.execution.allowBlockedEvidence === true,
       entries: getEffectiveQaEvidenceEntries(producerEvidenceResult.producerEvidence),
+      scenarioOutcomes:
+        producerEvidenceResult.producerEvidence.schemaVersion === 3
+          ? projectQaEvidenceScenarioOutcomes(producerEvidenceResult.producerEvidence)
+          : undefined,
     }),
   };
 }
@@ -348,32 +353,49 @@ function buildExecutionUnits(params: {
 function statusFromProducerEntries(params: {
   allowBlockedEvidence: boolean;
   entries: readonly QaEvidenceSummaryJson["entries"][number][];
+  scenarioOutcomes?: ReturnType<typeof projectQaEvidenceScenarioOutcomes>;
 }): Pick<QaTestFileScenarioResult, "failureMessage" | "status"> {
-  const { allowBlockedEvidence, entries } = params;
+  const { allowBlockedEvidence, entries, scenarioOutcomes } = params;
+  const failedEntry = entries.find((entry) => entry.result.status === "fail");
+  const failedScenario = scenarioOutcomes?.find((outcome) => outcome.status === "fail");
+  const blockedEntry = entries.find((entry) => entry.result.status === "blocked");
+  const blockedScenario = scenarioOutcomes?.find((outcome) => outcome.status === "blocked");
+  if (failedEntry || failedScenario) {
+    return {
+      failureMessage:
+        failedEntry?.result.failure?.reason ??
+        `${failedEntry?.test.id ?? failedScenario?.scenarioId} reported failed`,
+      status: "fail",
+    };
+  }
+  // Check the child's schedule before containment projects only the outer
+  // attempt. Allowing terminal blocked checks never authorizes unfinished work.
+  const unresolved = scenarioOutcomes?.find((outcome) => outcome.status === null);
+  if (unresolved) {
+    return {
+      failureMessage: `Script producer has an unresolved scheduled scenario: ${unresolved.scenarioId}`,
+      status: "blocked",
+    };
+  }
   if (entries.length === 0) {
     return {
       failureMessage: "Script exited successfully without reporting an executed producer check.",
       status: "fail",
     };
   }
-  const failedEntry = entries.find((entry) => entry.result.status === "fail");
-  const blockedEntry = entries.find((entry) => entry.result.status === "blocked");
-  if (failedEntry) {
-    return {
-      failureMessage:
-        failedEntry.result.failure?.reason ?? `${failedEntry.test.id} reported failed`,
-      status: "fail",
-    };
-  }
   const hasPassed = entries.some((entry) => entry.result.status === "pass");
-  if (blockedEntry && (!allowBlockedEvidence || !hasPassed)) {
+  if ((blockedEntry || blockedScenario) && (!allowBlockedEvidence || !hasPassed)) {
     return {
       failureMessage:
-        blockedEntry.result.failure?.reason ?? `${blockedEntry.test.id} reported blocked`,
+        blockedEntry?.result.failure?.reason ??
+        `${blockedEntry?.test.id ?? blockedScenario?.scenarioId} reported blocked`,
       status: "blocked",
     };
   }
-  if (entries.some((entry) => entry.result.status === "skipped")) {
+  if (
+    entries.some((entry) => entry.result.status === "skipped") ||
+    scenarioOutcomes?.some((outcome) => outcome.status === "skipped")
+  ) {
     return { status: "skipped" };
   }
   return { status: "pass" };

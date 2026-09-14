@@ -148,6 +148,44 @@ describe("QA profile evidence plan", () => {
   }
 
   it.each(["full", "slim"] as const)(
+    "keeps synthetic observations out of child assertion obligations in %s evidence",
+    (evidenceMode) => {
+      const { owner, complete } = proofInvocation();
+      const dispatch = owner.begin(0, null, { diagnostic: true });
+      const child = owner.begin(0, null);
+      complete(child, [{ status: "pass" }]);
+      owner.complete(dispatch, { status: "pass", entries: [] });
+      owner.select(0, child);
+      const evidence = owner.snapshot({
+        generatedAt: "2026-09-13T00:00:00Z",
+        evidenceMode,
+      });
+      const original = structuredClone(evidence);
+      const plan = proofPlan();
+      plan.proofRequirements[0]!.retryAcceptance = "all-recorded-attempts";
+      expect(qaProfileEvidencePlan.attest(plan, true, evidence).proof?.[0]?.qualified).toBe(true);
+      expect(evidence.occurrences.find((item) => item.id === dispatch)?.assertions).toBeNull();
+      expect(evidence).toEqual(original);
+
+      const incomplete = owner.begin(0, null);
+      owner.complete(incomplete, { status: "fail", entries: [] });
+      owner.select(0, incomplete);
+      const failed = owner.snapshot({
+        generatedAt: "2026-09-13T00:00:00Z",
+        evidenceMode,
+      });
+      expect(failed.occurrences.find((item) => item.id === incomplete)?.assertions).toHaveLength(1);
+      expect(qaProfileEvidencePlan.evaluateProof(plan, failed)[0]?.checks).toEqual([
+        expect.objectContaining({ occurrenceId: child, status: "qualified" }),
+        expect.objectContaining({ occurrenceId: incomplete, status: "incomplete" }),
+      ]);
+      expect(() => qaProfileEvidencePlan.attest(plan, true, failed)).toThrow(
+        "unqualified declared proof",
+      );
+    },
+  );
+
+  it.each(["full", "slim"] as const)(
     "qualifies one assertion with its bound target receipt in %s evidence",
     (mode) => {
       const evidence = proofEvidence([{ status: "pass" }], mode);

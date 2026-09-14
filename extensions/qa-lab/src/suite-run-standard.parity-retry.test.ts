@@ -391,13 +391,24 @@ describe("QA runtime parity scenario retry isolation", () => {
     expect(identity).toBeNull();
   });
 
-  it("retains a pass and a separate parent failure when the post-run probe throws", async () => {
-    const context = makeRetryTestContext();
-    const captured: QaEvidenceSummaryV3Json[] = [];
-    const error = new Error("post-run probe failed");
-    mocks.runQaSuiteRoundTripProbe.mockRejectedValueOnce(error);
-    await expect(
-      runQaFlowSuiteStandard(
+  it.each(["pass", "fail", "throws"] as const)(
+    "retains a pass and separate diagnostic when the post-run probe %s",
+    async (probeStatus) => {
+      const context = makeRetryTestContext();
+      context.selectedScenarios[0]!.assertions = [
+        { id: "scenario-result", meaning: "the scenario owns its result", coverage: [] },
+      ];
+      const captured: QaEvidenceSummaryV3Json[] = [];
+      const error = new Error("post-run probe failed");
+      if (probeStatus === "throws") {
+        mocks.runQaSuiteRoundTripProbe.mockRejectedValueOnce(error);
+      } else {
+        mocks.runQaSuiteRoundTripProbe.mockResolvedValueOnce({
+          passed: probeStatus === "pass" ? 1 : 0,
+          details: `probe ${probeStatus}`,
+        });
+      }
+      const run = runQaFlowSuiteStandard(
         {
           lab: makeRetryTestLab(),
           onEvidence: (summary) => captured.push(summary),
@@ -413,14 +424,26 @@ describe("QA runtime parity scenario retry isolation", () => {
         },
         context,
         vi.fn<QaSuiteScenarioRunner>().mockResolvedValue(makeRetryTestResult("pass")),
-      ),
-    ).rejects.toBe(error);
-    const summary = captured.at(-1)!;
-    expect(summary.entries.map((entry) => entry.result.status)).toEqual(["pass", "fail"]);
-    expect(summary.entries[1]?.coverage).toEqual([]);
-    expect(projectQaEvidenceScenarioOutcomes(summary)[0]?.status).toBe("fail");
-    expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();
-  });
+      );
+      if (probeStatus === "throws") {
+        await expect(run).rejects.toBe(error);
+        expect(mocks.writeQaSuiteArtifacts).not.toHaveBeenCalled();
+      } else {
+        await expect(run).resolves.toMatchObject({ scenarios: [{ status: probeStatus }] });
+      }
+      const summary = captured.at(-1)!;
+      const status = probeStatus === "pass" ? "pass" : "fail";
+      expect(summary.entries.map((entry) => entry.result.status)).toEqual(["pass", status]);
+      expect(summary.entries[1]?.coverage).toEqual([]);
+      expect(projectQaEvidenceScenarioOutcomes(summary)[0]?.status).toBe(status);
+      const actualId = summary.entries[0]!.binding.occurrenceId;
+      for (const occurrence of summary.occurrences) {
+        expect(occurrence.assertions).toEqual(
+          occurrence.id === actualId ? context.selectedScenarios[0]!.assertions : null,
+        );
+      }
+    },
+  );
 
   it("keeps unstarted repeated flow instances pending after the first failure", async () => {
     const lab = makeRetryTestLab();

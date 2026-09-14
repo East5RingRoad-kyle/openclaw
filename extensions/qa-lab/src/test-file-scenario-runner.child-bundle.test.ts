@@ -108,9 +108,11 @@ const scenarios = ["same", "other", "same"].map((id) => ({
   id, execution: { kind: "script" },
 }));
 const owner = createQaEvidenceInvocation({ scenarios, channel: null, launch });
-for (const [index, result] of [status, "pass"].entries()) {
+const results = [status, "pass"];
+if (value("--complete") === "true") results.push("pass");
+for (const [index, result] of results.entries()) {
   const id = owner.begin(index);
-  owner.complete(id, { status: result, entries: [{
+  owner.complete(id, { status: result, entries: index === 0 && value("--omit-first") === "true" ? [] : [{
     test: { id: scenarios[index].id, title: "Actual child check", kind: "script-test" },
     coverage: [
       { id: "qa.coverage", role: "primary" },
@@ -121,6 +123,7 @@ for (const [index, result] of [status, "pass"].entries()) {
   }] });
   owner.select(index, id);
 }
+if (value("--open") === "true") owner.begin(2);
 await fs.writeFile(path.join(output, "qa-evidence.json"),
   JSON.stringify(owner.snapshot({ generatedAt: new Date().toISOString() })), { flag: "wx" });
 console.log("child pid=" + process.pid);
@@ -131,12 +134,30 @@ process.exitCode = Number(value("--exit"));
         nextStatus: string,
         exit: string,
         continuation?: QaEvidenceSummaryV3Json,
+        options: {
+          completeSchedule?: boolean;
+          openUnresolved?: boolean;
+          allowBlockedEvidence?: boolean;
+          omitFirstRow?: boolean;
+        } = {},
       ) => {
         const scenario = makeTestFileScenario("script", script);
         if (scenario.execution.kind !== "script") {
           throw new Error("expected script");
         }
-        scenario.execution.args!.push("--status", nextStatus, "--exit", exit);
+        scenario.execution.args!.push(
+          "--status",
+          nextStatus,
+          "--exit",
+          exit,
+          "--complete",
+          String(options.completeSchedule === true),
+          "--open",
+          String(options.openUnresolved === true),
+          "--omit-first",
+          String(options.omitFirstRow === true),
+        );
+        scenario.execution.allowBlockedEvidence = options.allowBlockedEvidence;
         return runQaTestFileScenarios({
           repoRoot: process.cwd(),
           outputDir: path.join(root, "out"),
@@ -182,7 +203,55 @@ process.exitCode = Number(value("--exit"));
         null,
       ]);
       expect(new Set(original.occurrences.map((item) => item.id)).size).toBe(5);
-      const second = await run(status, "0", first.evidence);
+      if (status === "pass") {
+        for (const openUnresolved of [false, true]) {
+          for (const allowBlockedEvidence of [false, true]) {
+            const incomplete = await run("pass", "0", undefined, {
+              openUnresolved,
+              allowBlockedEvidence,
+            });
+            if (incomplete.evidence.schemaVersion !== 3) {
+              throw new Error("expected incomplete child bundle evidence");
+            }
+            expect(incomplete.results[0]).toMatchObject({
+              status: "blocked",
+              failureMessage: expect.stringContaining("unresolved scheduled scenario"),
+            });
+            expect(projectQaEvidenceScenarioOutcomes(incomplete.evidence)).toEqual([
+              expect.objectContaining({ status: "blocked" }),
+            ]);
+            expect(
+              incomplete.evidence.occurrences.filter(
+                (item) =>
+                  item.scenario?.kind === "instance" && item.scenario.resultOccurrenceId === null,
+              ),
+            ).toHaveLength(1);
+          }
+        }
+      } else {
+        const terminal = await run(status, "0", undefined, {
+          completeSchedule: true,
+          omitFirstRow: true,
+          allowBlockedEvidence: true,
+        });
+        // A terminal pointer without an effective row remains unresolved by the
+        // canonical reader, even when terminal blocked evidence is allowed.
+        expect(terminal.results[0]).toMatchObject({
+          status: "blocked",
+          failureMessage: expect.stringContaining("unresolved scheduled scenario"),
+        });
+        expect(
+          projectQaEvidenceScenarioOutcomes(terminal.results[0]!.producerEvidence!)[0]?.status,
+        ).toBeNull();
+        if (status === "blocked") {
+          const allowed = await run(status, "0", undefined, {
+            completeSchedule: true,
+            allowBlockedEvidence: true,
+          });
+          expect(allowed.results[0]?.status).toBe("pass");
+        }
+      }
+      const second = await run(status, "0", first.evidence, { completeSchedule: true });
       if (second.evidence.schemaVersion !== 3) {
         throw new Error("expected invocation evidence");
       }
@@ -213,19 +282,15 @@ process.exitCode = Number(value("--exit"));
         expect(projectQaEvidenceScenarioOutcomes(projected)).toHaveLength(1);
         const active = getEffectiveQaEvidenceEntries(projected);
         expect(active.map((entry) => entry.result.status)).toEqual(
-          status === "pass" ? ["pass", "pass", "pass"] : ["fail", "pass", "fail"],
+          status === "pass" ? ["pass", "pass", "pass", "pass"] : ["fail", "pass", "fail"],
         );
-        expect(active.slice(0, 2).map((entry) => entry.coverage)).toEqual([
-          [
+        expect(active.slice(0, -1).map((entry) => entry.coverage)).toEqual(
+          Array(status === "pass" ? 3 : 2).fill([
             { id: "qa.coverage", role: "primary" },
             { id: "qa.reporting", role: "secondary" },
-          ],
-          [
-            { id: "qa.coverage", role: "primary" },
-            { id: "qa.reporting", role: "secondary" },
-          ],
-        ]);
-        expect(active[2]!.coverage).toEqual([]);
+          ]),
+        );
+        expect(active.at(-1)!.coverage).toEqual([]);
       }
       expect(JSON.stringify(second.evidence)).toBe(finalBytes);
     },

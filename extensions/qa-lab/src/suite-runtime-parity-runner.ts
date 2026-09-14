@@ -142,7 +142,7 @@ export async function runQaRuntimeParitySuite(params: {
         );
         progress.markRunning([index]);
         const anchor = recording.invocation.anchors[index]!;
-        const comparisonId = recording.invocation.begin(index);
+        const comparisonId = recording.invocation.begin(index, undefined, { diagnostic: true });
         let recordingComparison = false;
         try {
           const parity = await runRuntimeParityScenario({
@@ -157,7 +157,7 @@ export async function runQaRuntimeParitySuite(params: {
                 comparisonId,
                 runtime,
               );
-              const dispatchId = recording.invocation.begin(index, null);
+              const dispatchId = recording.invocation.begin(index, null, { diagnostic: true });
               const cellStartedAt = Date.now();
               let childEvidence: QaEvidenceSummaryV3Json | undefined;
               const importChild = () => {
