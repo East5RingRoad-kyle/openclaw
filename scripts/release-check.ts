@@ -121,6 +121,19 @@ const PACKED_PLUGIN_SDK_SETUP_CONSUMER_FIXTURE = new URL(
   "./fixtures/packed-plugin-sdk-setup-consumer.ts",
   import.meta.url,
 );
+const PACKED_PLUGIN_SDK_SETUP_DECLARATIONS = [
+  "dist/plugin-sdk/setup.d.ts",
+  "dist/plugin-sdk/setup-runtime.d.ts",
+] as const;
+
+export function packedPluginSdkSupportsSetupSurface(installedOpenClawRoot: string): boolean {
+  return PACKED_PLUGIN_SDK_SETUP_DECLARATIONS.every((relativePath) => {
+    const declarationPath = join(installedOpenClawRoot, relativePath);
+    return (
+      existsSync(declarationPath) && readFileSync(declarationPath, "utf8").includes("setupSurface")
+    );
+  });
+}
 const PACKED_BUNDLED_CHANNEL_ENTRY_SMOKE_ENTRYPOINTS = [
   "scripts/test-built-bundled-channel-entry-smoke.mts",
   "scripts/test-built-bundled-channel-entry-smoke.mjs",
@@ -789,6 +802,16 @@ function runPackedPluginSdkTypescriptSmoke(
     });
 
     const installedOpenClawRoot = join(consumerDir, "node_modules", "openclaw");
+    if (!target.setupConsumerOnly && !packedPluginSdkSupportsSetupSurface(installedOpenClawRoot)) {
+      const indexPath = join(consumerDir, "src", "index.ts");
+      writeFileSync(
+        indexPath,
+        readFileSync(indexPath, "utf8").replace(
+          'import "./packed-plugin-sdk-setup-consumer.js";\n',
+          "",
+        ),
+      );
+    }
     const tscPath = [
       join(consumerDir, "node_modules", "typescript", "bin", "tsc"),
       join(installedOpenClawRoot, "node_modules", "typescript", "bin", "tsc"),

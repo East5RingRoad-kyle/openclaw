@@ -30,6 +30,7 @@ import {
   PACKED_BUNDLED_RUNTIME_DEPS_REPAIR_ARGS,
   PACKED_CLI_SMOKE_COMMANDS,
   PACKED_COMPLETION_SMOKE_ARGS,
+  packedPluginSdkSupportsSetupSurface,
   resolvePackedTarballPath,
   resolveReleaseNpmCommand,
   runReleaseCheckCommand,
@@ -620,6 +621,25 @@ describe("packed install verification", () => {
 });
 
 describe("createPackedPluginSdkTypescriptSmokeProject", () => {
+  it("detects whether both packed setup declarations expose setupSurface", () => {
+    const root = mkdtempSync(join(tmpdir(), "release-check-plugin-sdk-setup-surface-"));
+    try {
+      for (const relativePath of [
+        "dist/plugin-sdk/setup.d.ts",
+        "dist/plugin-sdk/setup-runtime.d.ts",
+      ]) {
+        const declarationPath = join(root, relativePath);
+        mkdirSync(dirname(declarationPath), { recursive: true });
+        writeFileSync(declarationPath, "export type Options = { setupSurface?: unknown };\n");
+      }
+      expect(packedPluginSdkSupportsSetupSurface(root)).toBe(true);
+      writeFileSync(join(root, "dist/plugin-sdk/setup-runtime.d.ts"), "export {};\n");
+      expect(packedPluginSdkSupportsSetupSurface(root)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("writes a consumer project that imports representative public SDK subpaths", () => {
     const root = mkdtempSync(join(tmpdir(), "release-check-plugin-sdk-types-"));
     try {
