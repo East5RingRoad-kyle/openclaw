@@ -41,7 +41,10 @@ import {
   testFileRunnerDefinitions,
   type QaScenarioCommandStep,
 } from "./test-file-scenario-runner-commands.js";
-import { readScriptProducerEvidence } from "./test-file-scenario-script-evidence.js";
+import {
+  readScriptProducerEvidence,
+  statusFromProducerEntries,
+} from "./test-file-scenario-script-evidence.js";
 import { readNativeVitestExecutionFailure } from "./test-file-scenario-vitest-report.js";
 export type { QaScenarioCommandExecution } from "./test-file-scenario-command-lifecycle.js";
 
@@ -348,57 +351,6 @@ function buildExecutionUnits(params: {
     units.sort((left, right) => left.order - right.order);
   }
   return units;
-}
-
-function statusFromProducerEntries(params: {
-  allowBlockedEvidence: boolean;
-  entries: readonly QaEvidenceSummaryJson["entries"][number][];
-  scenarioOutcomes?: ReturnType<typeof projectQaEvidenceScenarioOutcomes>;
-}): Pick<QaTestFileScenarioResult, "failureMessage" | "status"> {
-  const { allowBlockedEvidence, entries, scenarioOutcomes } = params;
-  const failedEntry = entries.find((entry) => entry.result.status === "fail");
-  const failedScenario = scenarioOutcomes?.find((outcome) => outcome.status === "fail");
-  const blockedEntry = entries.find((entry) => entry.result.status === "blocked");
-  const blockedScenario = scenarioOutcomes?.find((outcome) => outcome.status === "blocked");
-  if (failedEntry || failedScenario) {
-    return {
-      failureMessage:
-        failedEntry?.result.failure?.reason ??
-        `${failedEntry?.test.id ?? failedScenario?.scenarioId} reported failed`,
-      status: "fail",
-    };
-  }
-  // Check the child's schedule before containment projects only the outer
-  // attempt. Allowing terminal blocked checks never authorizes unfinished work.
-  const unresolved = scenarioOutcomes?.find((outcome) => outcome.status === null);
-  if (unresolved) {
-    return {
-      failureMessage: `Script producer has an unresolved scheduled scenario: ${unresolved.scenarioId}`,
-      status: "blocked",
-    };
-  }
-  if (entries.length === 0) {
-    return {
-      failureMessage: "Script exited successfully without reporting an executed producer check.",
-      status: "fail",
-    };
-  }
-  const hasPassed = entries.some((entry) => entry.result.status === "pass");
-  if ((blockedEntry || blockedScenario) && (!allowBlockedEvidence || !hasPassed)) {
-    return {
-      failureMessage:
-        blockedEntry?.result.failure?.reason ??
-        `${blockedEntry?.test.id ?? blockedScenario?.scenarioId} reported blocked`,
-      status: "blocked",
-    };
-  }
-  if (
-    entries.some((entry) => entry.result.status === "skipped") ||
-    scenarioOutcomes?.some((outcome) => outcome.status === "skipped")
-  ) {
-    return { status: "skipped" };
-  }
-  return { status: "pass" };
 }
 
 function resolveTestFileExecutionKind(scenarios: readonly QaTestFileScenario[]) {

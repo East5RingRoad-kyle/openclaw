@@ -300,6 +300,78 @@ describe("QA profile evidence plan", () => {
     expect(qaProfileEvidencePlan.attest(plan, true, evidence).proof?.[0]?.qualified).toBe(false);
   });
 
+  it.each(["fail", "blocked", "skipped"] as const)(
+    "excludes a rejected rowless %s retry only from selected-attempt proof",
+    (status) => {
+      for (const evidenceMode of ["full", "slim"] as const) {
+        const { owner, complete } = proofInvocation();
+        const first = owner.begin(0);
+        complete(first, [{ status: "pass" }], "fail");
+        const retry = owner.begin(0, first);
+        complete(retry, [], status);
+        const evidence = owner.snapshot({
+          generatedAt: "2026-09-13T00:00:00Z",
+          evidenceMode,
+        });
+        const original = structuredClone(evidence);
+        const plan = proofPlan();
+        expect(owner.selectedObservation(0)?.occurrence.id).toBe(first);
+        expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks).toEqual([
+          { occurrenceId: first, assertionId: "assertion-one", status: "qualified" },
+        ]);
+        expect(qaProfileEvidencePlan.attest(plan, true, evidence).proof?.[0]?.qualified).toBe(true);
+        plan.proofRequirements[0]!.retryAcceptance = "all-recorded-attempts";
+        expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks).toEqual([
+          { occurrenceId: first, assertionId: "assertion-one", status: "qualified" },
+          { occurrenceId: retry, assertionId: "assertion-one", status: "incomplete" },
+        ]);
+        expect(() => qaProfileEvidencePlan.attest(plan, true, evidence)).toThrow(
+          "unqualified declared proof",
+        );
+        expect(evidence).toEqual(original);
+      }
+    },
+  );
+
+  it("keeps selected rowless retries incomplete while retiring their predecessor proof", () => {
+    for (const evidenceMode of ["full", "slim"] as const) {
+      const { owner, complete } = proofInvocation();
+      const first = owner.begin(0);
+      complete(first, [], "fail");
+      const retry = owner.begin(0, first);
+      complete(retry, [], "pass");
+      const evidence = owner.snapshot({
+        generatedAt: "2026-09-13T00:00:00Z",
+        evidenceMode,
+      });
+      const original = structuredClone(evidence);
+      const plan = proofPlan();
+      expect(owner.selectedObservation(0)?.occurrence.id).toBe(retry);
+      expect(qaProfileEvidencePlan.evaluateProof(plan, evidence)[0]?.checks).toEqual([
+        { occurrenceId: retry, assertionId: "assertion-one", status: "incomplete" },
+      ]);
+      expect(() => qaProfileEvidencePlan.attest(plan, true, evidence)).toThrow(
+        "unqualified declared proof",
+      );
+      expect(evidence).toEqual(original);
+    }
+  });
+
+  it("retains independent rowless observations in selected-attempt proof", () => {
+    const { owner, complete } = proofInvocation();
+    const first = owner.begin(0);
+    complete(first, [{ status: "pass" }]);
+    const independent = owner.begin(0, null);
+    complete(independent, [], "blocked");
+    const evidence = owner.snapshot({ generatedAt: "2026-09-13T00:00:00Z" });
+    const original = structuredClone(evidence);
+    expect(qaProfileEvidencePlan.evaluateProof(proofPlan(), evidence)[0]?.checks).toEqual([
+      { occurrenceId: first, assertionId: "assertion-one", status: "qualified" },
+      { occurrenceId: independent, assertionId: "assertion-one", status: "incomplete" },
+    ]);
+    expect(evidence).toEqual(original);
+  });
+
   it("does not pool source and package proof from unrelated observations", () => {
     const { owner, complete } = proofInvocation();
     complete(owner.begin(0, null), [

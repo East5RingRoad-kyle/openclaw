@@ -285,7 +285,7 @@ process.exitCode = Number(value("--exit"));
           status === "pass" ? ["pass", "pass", "pass", "pass"] : ["fail", "pass", "fail"],
         );
         expect(active.slice(0, -1).map((entry) => entry.coverage)).toEqual(
-          Array(status === "pass" ? 3 : 2).fill([
+          Array.from({ length: status === "pass" ? 3 : 2 }, () => [
             { id: "qa.coverage", role: "primary" },
             { id: "qa.reporting", role: "secondary" },
           ]),

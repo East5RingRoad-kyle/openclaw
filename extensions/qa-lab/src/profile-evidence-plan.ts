@@ -224,12 +224,22 @@ function evaluateProof(
     } else if (evidence.schemaVersion === 3) {
       const containment = resolveQaEvidenceContainment(evidence.occurrences, evidence.entries);
       const byId = new Map(evidence.occurrences.map((occurrence) => [occurrence.id, occurrence]));
-      const superseded = new Set<string>();
-      for (const entry of evidence.entries) {
-        if (!entry.effective) {
-          continue;
+      const activeObservations = new Set(
+        evidence.entries
+          .filter((entry) => entry.effective)
+          .map((entry) => entry.binding.occurrenceId),
+      );
+      for (const occurrence of evidence.occurrences) {
+        if (
+          occurrence.scenario?.kind === "instance" &&
+          occurrence.scenario.resultOccurrenceId !== null
+        ) {
+          activeObservations.add(occurrence.scenario.resultOccurrenceId);
         }
-        let prior = byId.get(entry.binding.occurrenceId)?.retryOf;
+      }
+      const superseded = new Set<string>();
+      for (const id of activeObservations) {
+        let prior = byId.get(id)?.retryOf;
         while (prior) {
           superseded.add(prior);
           prior = byId.get(prior)?.retryOf;
@@ -242,9 +252,20 @@ function evaluateProof(
         const rows = evidence.entries.filter(
           (entry) => entry.binding.occurrenceId === occurrence.id,
         );
+        // A rejected retry may emit no rows. Preserve recorded selection even
+        // when its rows are missing, and keep independent observations visible.
+        let prior = occurrence.retryOf;
+        while (prior !== null && !activeObservations.has(prior)) {
+          prior = byId.get(prior)?.retryOf ?? null;
+        }
+        const rejectedRetry =
+          prior !== null &&
+          occurrence.terminalStatus !== "pass" &&
+          !activeObservations.has(occurrence.id);
         if (
           requirement.retryAcceptance === "selected-attempt" &&
           (superseded.has(occurrence.id) ||
+            rejectedRetry ||
             rows[0]?.effective === false ||
             !containment.isActive(occurrence.id))
         ) {
