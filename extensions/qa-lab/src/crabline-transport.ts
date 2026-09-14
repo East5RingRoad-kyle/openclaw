@@ -16,6 +16,7 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createQaBusState, type QaBusState } from "./bus-state.js";
 import {
+  createCrablineProviderCorrelationKey,
   createCrablineProviderDelivery,
   createCrablineProviderInboundInput,
   resolveCrablineStateConversation,
@@ -438,7 +439,17 @@ class QaCrablineTransport extends QaStateBackedTransportAdapter {
       target,
       providerThreadId,
     );
-    this.#state.rememberProviderTarget(providerTargetKey, logicalTarget);
+    if (providerThreadId === undefined && logicalTarget.threadId) {
+      this.#state.rememberProviderTarget(providerTargetKey, {
+        conversation: logicalTarget.conversation,
+      });
+      this.#state.rememberProviderTarget(
+        createCrablineProviderCorrelationKey(this.#adapter, logicalTarget),
+        logicalTarget,
+      );
+    } else {
+      this.#state.rememberProviderTarget(providerTargetKey, logicalTarget);
+    }
     return {
       ...delivery,
       ...(logicalTarget.threadId ? { threadId: logicalTarget.threadId } : {}),

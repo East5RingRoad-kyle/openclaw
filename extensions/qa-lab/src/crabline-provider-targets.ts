@@ -132,3 +132,18 @@ export function createCrablineProviderDelivery(
   });
   return { delivery, providerTargetKey };
 }
+
+export function createCrablineProviderCorrelationKey(
+  adapter: StartedOpenClawCrablineCorrelatedAdapter,
+  target: Pick<QaBusInboundMessageInput, "conversation" | "threadId">,
+) {
+  const providerInbound = adapter.createInbound({
+    input: createCrablineProviderInboundInput(adapter, {
+      conversation: target.conversation,
+      senderId: target.conversation.kind === "direct" ? target.conversation.id : "driver",
+      text: "QA provider correlation",
+      ...(target.threadId ? { threadId: target.threadId } : {}),
+    }),
+  });
+  return providerInbound.providerTargetKey;
+}
