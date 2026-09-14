@@ -3,7 +3,10 @@ import type { GatewayRecoveryRuntime } from "../../../gateway/server-instance-ru
 import { getAgentRunContext } from "../../../infra/agent-run-registry.js";
 import { isFastTestRuntimeEnv } from "../../../infra/env.js";
 import { getGatewayContextResolver } from "../../../plugins/runtime/gateway-request-scope.js";
-import { runWithGatewayIndependentRootWorkAdmission } from "../../../process/gateway-work-admission.js";
+import {
+  isGatewayRestartDrainError,
+  runWithGatewayIndependentRootWorkAdmission,
+} from "../../../process/gateway-work-admission.js";
 import { emitSessionLifecycleEvent } from "../../../sessions/session-lifecycle-events.js";
 import { createLazyImportLoader } from "../../../shared/lazy-promise.js";
 import { reconcileRetiredSubagentCancellation } from "../completion/subagent-completion-admission.store.js";
@@ -107,6 +110,10 @@ export function createSubagentRegistrySweeper(params: {
 
   function stop() {
     intervalStarted = false;
+    clearTimeout(scheduledTimer ?? undefined);
+    scheduledTimer = null;
+    scheduledAt = Number.POSITIVE_INFINITY;
+    rerunRequested = false;
   }
 
   function schedule(options?: { delayMs?: number }) {
@@ -133,16 +140,19 @@ export function createSubagentRegistrySweeper(params: {
     try {
       await runWithGatewayIndependentRootWorkAdmission(sweepOnce, "subagents:sweeper");
     } catch (error) {
+      if (isGatewayRestartDrainError(error)) {
+        params.warn("subagent run sweep skipped: gateway is draining for restart");
+        return;
+      }
       params.warn(
         `subagent run sweep failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-    } finally {
-      if (rerunRequested) {
-        rerunRequested = false;
-        schedule({ delayMs: 0 });
-      } else if (intervalStarted) {
-        schedule({ delayMs: 60_000 });
-      }
+    }
+    if (rerunRequested) {
+      rerunRequested = false;
+      schedule({ delayMs: 0 });
+    } else if (intervalStarted) {
+      schedule({ delayMs: 60_000 });
     }
   }
 
@@ -716,12 +726,7 @@ export function createSubagentRegistrySweeper(params: {
     runTick,
     reset() {
       stop();
-      clearTimeout(scheduledTimer ?? undefined);
-      scheduledTimer = null;
-      scheduledAt = Number.POSITIVE_INFINITY;
       recovery.reset();
-      rerunRequested = false;
-      intervalStarted = false;
       sweepInProgress = false;
     },
   };

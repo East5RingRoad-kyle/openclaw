@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { resolveSessionStorePathCore } from "../../../config/sessions.js";
 import {
@@ -8,7 +8,11 @@ import {
   resetSessionEntryLifecycle,
 } from "../../../config/sessions/session-accessor.js";
 import type { GatewayRecoveryRuntime } from "../../../gateway/server-instance-runtime.types.js";
-import { resetGatewayWorkAdmission } from "../../../process/gateway-work-admission.js";
+import {
+  markGatewayRestartDraining,
+  resetGatewayWorkAdmission,
+  tryBeginGatewaySuspendAdmission,
+} from "../../../process/gateway-work-admission.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import { createSubagentRunRecord } from "../../subagent-test-fixtures.test-helpers.js";
 import { reconcileDurableSubagentKillIntent } from "./subagent-registry-sweep-kill.js";
@@ -165,6 +169,7 @@ function createHarness(runtime: { current?: GatewayRecoveryRuntime }, entry = ru
       ),
     warn,
   });
+  onTestFinished(() => sweeper.reset());
   return {
     entry,
     runs,
@@ -482,6 +487,60 @@ describe("subagent registry recovery scheduling", () => {
     expect(recoverRow).toHaveBeenCalledOnce();
     sweeper.reset();
   });
+
+  it("cancels a scheduled registry sweep on stop and preserves the next start cadence", async () => {
+    recoverRow.mockResolvedValue({ status: "handled" });
+    const { sweeper } = createHarness({});
+    await sweeper.runTick();
+    expect(recoverRow).toHaveBeenCalledOnce();
+    recoverRow.mockClear();
+
+    sweeper.schedule({ delayMs: 1 });
+    sweeper.stop();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recoverRow).not.toHaveBeenCalled();
+
+    sweeper.start();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(recoverRow).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(recoverRow).toHaveBeenCalledOnce();
+    sweeper.reset();
+  });
+
+  it.each([false, true])(
+    "skips restart drain and resumes recurring registry sweeps (waiting for suspension: %s)",
+    async (suspended) => {
+      recoverRow.mockResolvedValue({ status: "handled" });
+      const { sweeper, warn } = createHarness({});
+      if (suspended) {
+        expect(tryBeginGatewaySuspendAdmission()).not.toBeNull();
+      } else {
+        markGatewayRestartDraining();
+      }
+      sweeper.start();
+      sweeper.schedule({ delayMs: 1 });
+      await vi.advanceTimersByTimeAsync(1);
+      if (suspended) {
+        expect(warn).not.toHaveBeenCalled();
+        markGatewayRestartDraining();
+      }
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(recoverRow).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        "subagent run sweep skipped: gateway is draining for restart",
+      );
+
+      resetGatewayWorkAdmission();
+      sweeper.schedule({ delayMs: 1 });
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => expect(recoverRow).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(recoverRow).toHaveBeenCalledTimes(2);
+      sweeper.reset();
+    },
+  );
 
   it("re-resolves a missing runtime without consuming the dispatch budget", async () => {
     const runtime: { current?: GatewayRecoveryRuntime } = {};
@@ -943,6 +1002,39 @@ describe("subagent registry recovery scheduling", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(recoverRow).toHaveBeenCalledTimes(2);
+    sweeper.reset();
+  });
+
+  it("settles an active registry sweep without reviving its stopped rerun", async () => {
+    const pending = createDeferred<{ status: "handled" }>();
+    recoverRow.mockReturnValueOnce(pending.promise).mockResolvedValue({ status: "handled" });
+    const { sweeper } = createHarness({});
+
+    const first = sweeper.runTick();
+    await vi.waitFor(() => expect(recoverRow).toHaveBeenCalledOnce());
+    await sweeper.runTick();
+    sweeper.stop();
+    pending.resolve({ status: "handled" });
+    await first;
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(recoverRow).toHaveBeenCalledOnce();
+    sweeper.reset();
+  });
+
+  it("reports an admitted registry sweep failure even when restart drain has started", async () => {
+    recoverRow.mockImplementationOnce(async () => {
+      markGatewayRestartDraining();
+      throw new Error("unexpected recovery failure");
+    });
+    const { sweeper, warn } = createHarness({});
+
+    sweeper.schedule({ delayMs: 1 });
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "subagent run sweep failed: unexpected recovery failure",
+    );
     sweeper.reset();
   });
 
