@@ -24,6 +24,22 @@ export function createManagedHandoffProcessIdentityReader(options: {
   onWarning?: (pid: number, message: string) => void;
 }) {
   const warnedIdentityPids = new Set<number>();
+  let selfIdentity: HandoffProcessIdentity | undefined;
+  let parentStartIdentity: string | undefined;
+  function warn(pid: number, continuation: string) {
+    if (warnedIdentityPids.has(pid)) {
+      return;
+    }
+    warnedIdentityPids.add(pid);
+    try {
+      options.onWarning?.(
+        pid,
+        `Native Windows creation-time queries returned no identity for PID ${pid}; ${continuation}.`,
+      );
+    } catch {
+      // Diagnostic persistence cannot interrupt an attributed update process.
+    }
+  }
   // Lease reclamation needs ESRCH evidence; other probe errors cannot prove absence.
   const isPidAlive = (pid: number) => !isPidDefinitelyDead(pid);
 
@@ -33,7 +49,11 @@ export function createManagedHandoffProcessIdentityReader(options: {
       LC_ALL: "C",
       TZ: "UTC",
     });
-    return start === null ? null : String(start);
+    return start === null
+      ? pid === process.pid
+        ? (parentStartIdentity ?? null)
+        : null
+      : String(start);
   }
 
   function readWindowsArgvIdentity(pid: number): string | null {
@@ -75,9 +95,42 @@ export function createManagedHandoffProcessIdentityReader(options: {
         WINDOWS_ARGV_IDENTITY_PATTERN.test(value.startIdentity))
     );
   }
+  function acceptSelfIdentity(value: HandoffProcessIdentity, parentBound = false): boolean {
+    if (value.pid !== process.pid) {
+      return false;
+    }
+    const state = inspectProcessIdentity(value);
+    if (state === "live") {
+      selfIdentity ??= { ...value };
+      return true;
+    }
+    if (
+      state !== "unknown" ||
+      !parentBound ||
+      process.platform !== "win32" ||
+      WINDOWS_ARGV_IDENTITY_PATTERN.test(value.startIdentity)
+    ) {
+      return false;
+    }
+    // The caller verified the live parent and its current receiver admission.
+    // A process cannot outlive its own start identity; foreign probes stay fresh.
+    parentStartIdentity = value.startIdentity;
+    selfIdentity ??= { ...value };
+    warn(value.pid, "continuing with the creation identity established by the live parent");
+    return true;
+  }
   function processIdentity(pid = process.pid, argv?: readonly string[]): HandoffProcessIdentity {
+    if (pid === process.pid && selfIdentity) {
+      if (!acceptSelfIdentity(selfIdentity)) {
+        throw new Error("managed handoff process identity changed");
+      }
+      return { ...selfIdentity };
+    }
     const startIdentity = readProcessStartIdentity(pid);
     if (startIdentity !== null) {
+      if (pid === process.pid) {
+        selfIdentity = { pid, startIdentity };
+      }
       return { pid, startIdentity };
     }
     const attribution =
@@ -87,16 +140,9 @@ export function createManagedHandoffProcessIdentityReader(options: {
           : readWindowsArgvIdentity(pid)
         : null;
     if (attribution) {
-      if (!warnedIdentityPids.has(pid)) {
-        warnedIdentityPids.add(pid);
-        const message = `Native Windows creation-time queries returned no identity for PID ${pid}; continuing with PID and launcher attribution.`;
-        try {
-          if (options.onWarning) {
-            options.onWarning(pid, message);
-          }
-        } catch {
-          // Diagnostic persistence cannot interrupt an attributed update process.
-        }
+      warn(pid, "continuing with PID and launcher attribution");
+      if (pid === process.pid) {
+        selfIdentity = { pid, startIdentity: attribution, startIdentitySource: "argv-sha256" };
       }
       return { pid, startIdentity: attribution, startIdentitySource: "argv-sha256" };
     }
@@ -108,5 +154,6 @@ export function createManagedHandoffProcessIdentityReader(options: {
     processIdentity,
     processState,
     isProcessIdentityCurrent,
+    acceptSelfIdentity,
   };
 }

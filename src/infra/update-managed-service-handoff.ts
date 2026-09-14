@@ -2656,10 +2656,12 @@ export async function isCurrentManagedServiceUpdateHandoffProcess(params: {
     return false;
   }
   const lease = readManagedServiceUpdateHandoffLease(root);
+  const store = createManagedHandoffLeaseStore();
   return (
     lease?.owner === meta.handoffId &&
     lease.executor.pid === process.pid &&
-    createManagedHandoffLeaseStore().isProcessIdentityCurrent(lease.executor)
+    (store.isProcessIdentityCurrent(lease.executor) ||
+      (process.connected && store.acceptParentBoundExecutor(lease)))
   );
 }
 

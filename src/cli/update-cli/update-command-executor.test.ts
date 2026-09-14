@@ -32,6 +32,7 @@ import { updateExecutorNativeEntrypoints } from "./update-command-executor-nativ
 import {
   captureUpdateCommandExecutorAuthority,
   releaseUpdateCommandPreflightForHandoff,
+  withDelegatedUpdateCommandExecutor,
   withUpdateCommandExecutor,
   withUpdateCommandExecutorChild,
 } from "./update-command-executor.js";
@@ -429,6 +430,128 @@ describe("live update executor", () => {
 
 describe("candidate executor delegation", () => {
   const moduleUrl = new URL("./update-command-executor.ts", import.meta.url).href;
+  it.each([
+    { mismatched: false, becomesReadable: false },
+    { mismatched: true, becomesReadable: false },
+    { mismatched: false, becomesReadable: true },
+  ])(
+    "consumes the parent's bound creation identity when the Windows receiver cannot read its own (mismatch=$mismatched, fallback becomes readable=$becomesReadable)",
+    async ({ mismatched, becomesReadable }) => {
+      const hostPlatform = process.platform;
+      const existingUri = sqliteLocation.resolveExistingSqliteFileUri;
+      vi.spyOn(sqliteLocation, "resolveExistingSqliteFileUri").mockImplementation((pathname) =>
+        existingUri(pathname, hostPlatform),
+      );
+      const readStart = pidAlive.getFileLockProcessStartTime;
+      const parentStart = readStart(process.ppid);
+      const receiverStart = readStart(process.pid);
+      assert(parentStart !== null);
+      assert(receiverStart !== null);
+      const store = createManagedHandoffLeaseStore();
+      const runId = randomUUID();
+      const childKey = `${root}/.openclaw-update-child-${randomUUID()}`;
+      assert(store.acquire(root, randomUUID(), { kind: "update" }).kind === "acquired");
+      assert(store.acquire(childKey, runId, { kind: "update" }).kind === "acquired");
+      const platform = vi.spyOn(process, "platform", "get").mockReturnValue("win32");
+      let currentReceiverStart = mismatched ? receiverStart + 1 : null;
+      vi.spyOn(pidAlive, "getFileLockProcessStartTime").mockImplementation((pid, ...args) => {
+        if (pid === process.pid) {
+          return currentReceiverStart;
+        }
+        if (pid === process.ppid) {
+          return parentStart;
+        }
+        platform.mockReturnValue(hostPlatform);
+        try {
+          return readStart(pid, ...args);
+        } finally {
+          platform.mockReturnValue("win32");
+        }
+      });
+      const parentIdentity = { pid: process.ppid, startIdentity: String(parentStart) };
+      const receiverIdentity = becomesReadable
+        ? createManagedHandoffLeaseStore().processIdentity()
+        : { pid: process.pid, startIdentity: String(receiverStart) };
+      const databasePath = path.join(temporary, "managed-update-handoffs.sqlite");
+      const db = new DatabaseSync(databasePath);
+      try {
+        // Reproduce the rows already bound by the parent before releasing private stdin.
+        const update = db.prepare(
+          "UPDATE managed_update_handoffs SET payload_json = ? WHERE install_root = ?",
+        );
+        for (const [key, executor] of [
+          [root, parentIdentity],
+          [childKey, receiverIdentity],
+        ] as const) {
+          update.run(
+            JSON.stringify({
+              version: 2,
+              helper: parentIdentity,
+              executor,
+              action: { kind: "update" },
+            }),
+            key,
+          );
+        }
+      } finally {
+        db.close();
+      }
+      const parent = store.read(root);
+      assert(parent.kind === "current");
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const operation = vi.fn(async (fence: UpdateRecoveryFence) => {
+        fence.assertCurrent();
+        if (becomesReadable) {
+          currentReceiverStart = receiverStart;
+        }
+        let nestedKey: string | undefined;
+        await withUpdateCommandExecutorChild(fence, root, async (grant, bindChild) => {
+          nestedKey = grant.childKey;
+          const candidate = spawn(process.execPath, ["-e", "process.stdin.resume()"], {
+            stdio: ["pipe", "ignore", "ignore"],
+          });
+          const exited = once(candidate, "exit");
+          try {
+            await once(candidate, "spawn");
+            assert(candidate.pid);
+            bindChild(candidate.pid, candidate.spawnargs);
+            const nested = store.read(grant.childKey);
+            assert(nested.kind === "current");
+            expect(nested.lease.helper).toEqual(receiverIdentity);
+            candidate.stdin.end();
+            await exited;
+          } finally {
+            if (candidate.exitCode === null && candidate.signalCode === null) {
+              candidate.kill("SIGKILL");
+            }
+            await exited;
+          }
+        });
+        assert(nestedKey);
+        expect(store.read(nestedKey)).toEqual({ kind: "absent" });
+        fence.assertCurrent();
+        return "completed";
+      });
+      const result = withDelegatedUpdateCommandExecutor(
+        { runId, root, databasePath, parent: parent.lease, childKey },
+        runId,
+        root,
+        operation,
+      );
+      if (mismatched) {
+        await expect(result).rejects.toThrow(/ownership|identity/);
+      } else {
+        await expect(result).resolves.toBe("completed");
+      }
+      expect(operation).toHaveBeenCalledTimes(mismatched ? 0 : 1);
+      if (!mismatched && !becomesReadable) {
+        expect(warning).toHaveBeenCalledWith(
+          expect.stringContaining("established by the live parent"),
+        );
+      }
+    },
+  );
+
   it("refuses a revoked requester before delegated Doctor changes operator config", async () => {
     const configPath = path.join(root, "openclaw.json");
     const original = JSON.stringify({

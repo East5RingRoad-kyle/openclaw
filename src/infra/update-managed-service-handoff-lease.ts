@@ -91,6 +91,7 @@ export function createManagedHandoffLeaseStore(
     processIdentity,
     processState,
     isProcessIdentityCurrent,
+    acceptSelfIdentity,
   } = createManagedHandoffProcessIdentityReader({
     env: serviceManagerEnv,
     onWarning:
@@ -393,7 +394,18 @@ export function createManagedHandoffLeaseStore(
       ) &&
       lease[role].pid === process.pid &&
       isProcessIdentityCurrent(lease.helper) &&
-      (role === "helper" || isProcessIdentityCurrent(lease.executor))
+      acceptSelfIdentity(lease[role])
+    );
+  }
+  function acceptParentBoundExecutor(lease: ManagedHandoffLease) {
+    return (
+      current(lease) &&
+      lease.version === 2 &&
+      lease.action.kind === "update" &&
+      lease.helper.pid === process.ppid &&
+      lease.executor.pid === process.pid &&
+      isProcessIdentityCurrent(lease.helper) &&
+      acceptSelfIdentity(lease.executor, true)
     );
   }
   function cas(
@@ -668,6 +680,7 @@ export function createManagedHandoffLeaseStore(
     retarget,
     activate,
     owns,
+    acceptParentBoundExecutor,
     current,
     readGeneration,
     settle,

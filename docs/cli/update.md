@@ -149,8 +149,9 @@ existing behavior.
 
 On Windows, capability probes stay alive until the updater finishes binding their
 process identity. If Windows cannot supply a process creation timestamp, the
-updater uses the child's recorded launcher identity and reports a warning in the
-run history and diagnostic logs. A different observed identity still refuses the
+updater retains the identity established by the live parent or uses the child's
+recorded launcher identity, with a warning in the run history and diagnostic logs.
+A different observed identity still refuses the
 handoff. Scheduled Tasks using `InteractiveToken` remain supported; this does not
 require storing a task password.
 

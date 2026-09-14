@@ -391,6 +391,14 @@ export async function withDelegatedUpdateCommandExecutor<T>(
       let active = true;
       const isLive = (identity: ManagedHandoffLease["executor"]) =>
         store.isProcessIdentityCurrent(identity);
+      if (
+        !store.acceptParentBoundExecutor(originalChild.lease) ||
+        !store.acceptParentBoundExecutor(child.lease)
+      ) {
+        throw new UpdateCommandRecoveryPendingError(
+          "Candidate executor ownership is no longer current.",
+        );
+      }
       const assertBase = () => {
         activation.assertCurrent();
         if (
@@ -600,7 +608,8 @@ export async function withUpdateCommandExecutor<T>(
                 !active ||
                 !handedOff ||
                 found.lease.action.kind !== "update" ||
-                !store.owns(found.lease, "executor")
+                (!store.owns(found.lease, "executor") &&
+                  !(process.connected && store.acceptParentBoundExecutor(found.lease)))
               ) {
                 throw new UpdateCommandRecoveryPendingError(
                   "Managed update executor changed during admission.",
@@ -633,6 +642,15 @@ export async function withUpdateCommandExecutor<T>(
               existingIdentity: authority,
               onProcessIdentityWarning: identityWarnings.warn,
             });
+            if (
+              borrowed &&
+              !store.owns(lease, "executor") &&
+              !(process.connected && store.acceptParentBoundExecutor(lease))
+            ) {
+              throw new UpdateCommandRecoveryPendingError(
+                "Managed update executor changed during admission.",
+              );
+            }
             assertCurrent();
             admittedAuthorities.set(fence, authority);
             if (enterOptions?.preflight && !borrowed) {
