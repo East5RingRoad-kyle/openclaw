@@ -49,8 +49,9 @@ describe("buildFeishuPresentationCard", () => {
             value: expect.objectContaining({
               oc: "ocf1",
               k: "quick",
-              a: "feishu.payload.button",
+              a: "feishu.question.answer",
               q: "Confirm",
+              m: { questionId: "question-1" },
             }),
           },
         ],
