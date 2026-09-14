@@ -18,6 +18,7 @@ import {
   pluginTabSlugFromPath,
   routeIdFromPath,
   setPluginTabSlugs,
+  sameRouteLocation,
   type RouteId,
 } from "./app-route-paths.ts";
 import type { ApplicationContext } from "./app/context.ts";
@@ -188,12 +189,6 @@ function routerHistoryLocation(location: ReturnType<RouterHistory["location"]>, 
     pathname: pathForRoute(routeId, basePath),
     search: `?${search.toString()}`,
   };
-}
-
-export function sameRouteLocation(left: RouteLocation, right: RouteLocation): boolean {
-  return (
-    left.pathname === right.pathname && left.search === right.search && left.hash === right.hash
-  );
 }
 
 function isRouteNotFound(error: unknown): error is RouteNotFound {

@@ -2,8 +2,10 @@ import type { SystemInfoResult } from "@openclaw/gateway-protocol";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { html, nothing, type PropertyValues } from "lit";
 import { property } from "lit/decorators.js";
-import "../../components/desktop/desktop-panel.ts";
+import type { RouteId } from "../../app-route-paths.ts";
+import type { ApplicationContext } from "../../app/context.ts";
 import { icons } from "../../components/icons.ts";
+import "../../components/desktop/desktop-panel.ts";
 import { DESKTOP_PANEL_TOGGLE_EVENT } from "../../components/panel-toggle-contract.ts";
 import { t } from "../../i18n/index.ts";
 import { registerSystemsEnglish } from "../../i18n/locales/en-systems.ts";
@@ -16,7 +18,8 @@ import {
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { PollController } from "../../lit/poll-controller.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
-import type { SystemsController, SystemsRouteData } from "./systems-controller.ts";
+import { SystemsController } from "./systems-controller.ts";
+import type { SystemsRouteData } from "./systems-controller.ts";
 import type { SystemsInventoryRow } from "./systems-data.ts";
 import { systemKind, systemName, systemStatus } from "./systems-sidebar.ts";
 import "../../styles/systems.css";
@@ -348,4 +351,24 @@ declare global {
   interface HTMLElementTagNameMap {
     "openclaw-systems-page": SystemsPage;
   }
+}
+
+/** Route rendering stays in the lazy page module, not in startup route metadata. */
+export function render(data: SystemsRouteData | undefined, _pending: boolean, presented = true) {
+  return data
+    ? html`<openclaw-systems-page
+        .routeData=${data}
+        .presented=${presented}
+      ></openclaw-systems-page>`
+    : nothing;
+}
+
+export function renderSidebar(data: SystemsRouteData | undefined) {
+  return data
+    ? html`<openclaw-systems-sidebar .controller=${data.controller}></openclaw-systems-sidebar>`
+    : nothing;
+}
+
+export function load(context: ApplicationContext<RouteId>): SystemsRouteData {
+  return { controller: new SystemsController(context) };
 }

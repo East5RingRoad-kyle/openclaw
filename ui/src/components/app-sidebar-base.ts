@@ -1,9 +1,9 @@
 import { consume } from "@lit/context";
-import { property } from "lit/decorators.js";
+import { property, state } from "lit/decorators.js";
 import { DEFAULT_SIDEBAR_ENTRIES, type NavigationRouteId } from "../app-navigation.ts";
 import type { RouteId } from "../app-route-paths.ts";
+import type { ApplicationRouter } from "../app-routes.ts";
 import { selectApplicationSession } from "../app/agent-selection.ts";
-import type { ShellRouteState } from "../app/app-host-route-state.ts";
 import {
   applicationContext,
   type ApplicationContext,
@@ -19,12 +19,17 @@ import { SESSION_NAVIGATION_KEY_PARAM } from "../lib/sessions/route-navigation.t
 import { parseAgentSessionKey, resolveUiConfiguredMainKey } from "../lib/sessions/session-key.ts";
 import { OpenClawLightDomContentsElement } from "../lit/openclaw-element.ts";
 import type { NewSessionTarget } from "../pages/new-session/location.ts";
+import type { ContextualSidebar } from "./sidebar-context-state.ts";
 
 /** Stable custom-element inputs. Behavior is layered in focused sidebar modules. */
 export abstract class AppSidebarBase extends OpenClawLightDomContentsElement {
   @property({ attribute: false }) basePath = "";
   @property({ attribute: false }) activeRouteId?: NavigationRouteId;
-  @property({ attribute: false }) contextualSidebar?: ShellRouteState["contextualSidebar"];
+  @property({ attribute: false }) router?: Pick<
+    ApplicationRouter,
+    "getState" | "subscribeSelector"
+  >;
+  @state() contextualSidebar?: ContextualSidebar;
   @property({ attribute: false }) activePluginTabId = "";
   @property({ attribute: false }) enabledRouteIds?: readonly NavigationRouteId[];
   @property({ attribute: false }) connected = false;

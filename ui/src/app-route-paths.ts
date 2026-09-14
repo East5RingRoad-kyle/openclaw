@@ -618,3 +618,14 @@ export function restoreBridgedRouteLocation(
     hash: location.hash,
   };
 }
+
+export function sameRouteLocation(
+  left: RouteLocation | undefined,
+  right: RouteLocation | undefined,
+): boolean {
+  return (
+    left?.pathname === right?.pathname &&
+    left?.search === right?.search &&
+    left?.hash === right?.hash
+  );
+}

@@ -261,7 +261,7 @@ export function renderApplicationShell(host: ShellViewHost) {
     Object.assign(host.navigationSidebar, {
       basePath: context.basePath,
       activeRouteId: activeRoute,
-      contextualSidebar: host.routeState.contextualSidebar,
+      router: host.runtime.router,
       activePluginTabId,
       enabledRouteIds: host.enabledRouteIds(),
       sessionKey: host.activeSessionKey,

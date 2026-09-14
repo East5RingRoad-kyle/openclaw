@@ -1,6 +1,6 @@
-import type { RouteLocation, RouterState } from "@openclaw/uirouter";
+import type { RouteLocation } from "@openclaw/uirouter";
 import { vi } from "vitest";
-import type { RouteId } from "../app-routes.ts";
+import type { ApplicationRouter, RouteId } from "../app-routes.ts";
 import type { ApplicationContext } from "./context.ts";
 
 export type ShellKeyboardState = {
@@ -63,7 +63,7 @@ export function committedRouterState(
   routeId: RouteId,
   pathname: string,
   data?: unknown,
-): RouterState<RouteId> {
+): ReturnType<ApplicationRouter["getState"]> {
   const location = { pathname, search: "", hash: "" } satisfies RouteLocation;
   return {
     location,
@@ -72,5 +72,5 @@ export function committedRouterState(
     matches: [{ routeId, location, data }],
     pendingMatches: [],
     cachedMatches: [],
-  } as unknown as RouterState<RouteId>;
+  } as unknown as ReturnType<ApplicationRouter["getState"]>;
 }
