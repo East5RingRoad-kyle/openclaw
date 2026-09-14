@@ -13,12 +13,8 @@ import { waitForFast } from "../wait-for.ts";
 import { openSessionMenu, selectSessionMenuValue } from "./session-menu.ts";
 import "../../components/app-sidebar.ts";
 
-async function selectSort(sidebar: SidebarLifecycleState, mode: string) {
-  await selectSessionMenuValue(sidebar, `sort:${mode}`);
-}
-
 async function expectSort(sidebar: SidebarLifecycleState, mode: string, keys: string[]) {
-  await selectSort(sidebar, mode);
+  await selectSessionMenuValue(sidebar, `sort:${mode}`);
   expect(visibleSessionKeys(sidebar)).toEqual(keys);
 }
 
