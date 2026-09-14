@@ -226,14 +226,18 @@ it("fences admission before retirement while an admitted sibling stays usable", 
 function retainDistinctMetadataOwners() {
   const firstCache = getPluginCache();
   const first = retainGatewayPluginMetadata();
-  onTestFinished(() => first.close());
+  onTestFinished(async () => {
+    await first.close();
+  });
   const firstSnapshot = first.runBootstrap(() => createPluginMetadataSnapshotFixture());
   first.publish(firstSnapshot);
   selectCurrentPluginMetadataCache(firstCache);
   setGatewayPluginMetadataSnapshot(firstSnapshot);
   const secondCache = createPluginCache();
   const second = withPluginCache(secondCache, () => retainGatewayPluginMetadata());
-  onTestFinished(() => second.close());
+  onTestFinished(async () => {
+    await second.close();
+  });
   const secondSnapshot = second.runBootstrap(() => createPluginMetadataSnapshotFixture());
   second.publish(secondSnapshot);
   selectCurrentPluginMetadataCache(secondCache);
