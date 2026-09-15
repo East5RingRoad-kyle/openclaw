@@ -518,13 +518,18 @@ export async function handleFeishuMessage(params: {
   let effectiveThreadId = ctx.threadId;
   if (
     isGroup &&
-    ctx.chatType === "topic_group" &&
     !effectiveThreadId &&
-    isFeishuTopicSessionScope(groupSessionScope ?? "group")
+    isFeishuTopicSessionScope(groupSessionScope ?? "group") &&
+    (ctx.chatType === "topic_group" || ctx.rootId?.trim())
   ) {
     // Synthetic turns keep a local dedupe ID in messageId; their explicit reply target is
     // the real Feishu message ID that topic hydration can send back to the provider.
-    const topicHydrationMessageId = ctx.replyTargetMessageId ?? ctx.messageId;
+    // Regular-group thread replies carry rootId but no threadId: hydrate from the root
+    // message so replies land in the same topic session as the thread starter.
+    const topicHydrationMessageId =
+      ctx.chatType === "topic_group"
+        ? ctx.replyTargetMessageId ?? ctx.messageId
+        : ctx.rootId;
     try {
       const messageInfo = await getMessageFeishu({
         cfg,
