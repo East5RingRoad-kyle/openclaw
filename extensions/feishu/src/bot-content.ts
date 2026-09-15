@@ -83,11 +83,13 @@ export function resolveFeishuGroupSession(params: {
     (legacyTopicSessionMode === "enabled" ? "group_topic" : "group");
   const normalizedTopicGroupThreadId =
     chatType === "topic_group" ? (normalizedThreadId ?? normalizedRootId) : undefined;
+  // Thread ID (omt_) is the canonical topic identifier; a regular-group reply's
+  // rootId (om_) must not override it or the same topic splits into two sessions.
   const topicScope =
     groupSessionScope === "group_topic" || groupSessionScope === "group_topic_sender"
-      ? (normalizedTopicGroupThreadId ??
+      ? (normalizedThreadId ??
+        normalizedTopicGroupThreadId ??
         normalizedRootId ??
-        normalizedThreadId ??
         (replyInThread ? messageId : null))
       : null;
 
